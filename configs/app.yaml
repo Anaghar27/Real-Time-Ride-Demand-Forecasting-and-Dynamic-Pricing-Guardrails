@@ -1,0 +1,17 @@
+project:
+  name: Real_Time_Ride_Demand_Forecasting_and_Dynamic_Pricing_Guardrails
+  version: 0.1.0
+
+runtime:
+  env: local
+  log_level: INFO
+
+api:
+  host: 0.0.0.0
+  port: 8000
+
+database:
+  driver: postgresql
+
+mlflow:
+  tracking_uri: http://localhost:5000
