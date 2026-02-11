@@ -29,6 +29,24 @@ Production-style local-first ML/MLOps platform for NYC TLC ride-demand forecasti
 5. Step 1.5 idempotent rerun-safe ingestion
 6. Step 1.6 historical backfill (strictly locked behind gate)
 
+## Phase 2 feature pipeline scope
+- Purpose: generate leakage-safe, model-ready demand features at exact 15-minute grain (`zone_id`, `bucket_start_ts`).
+- Target definition: `pickup_count` from trip `pickup_datetime` aggregated by pickup zone.
+- Timezone policy: all storage timestamps are UTC `TIMESTAMPTZ`; calendar derivations use `FEATURE_TIMEZONE`.
+- Leakage prevention guarantees:
+  - lags computed with strict partition/order by `zone_id`, `bucket_start_ts`
+  - rolling frames exclude current row (`ROWS BETWEEN N PRECEDING AND 1 PRECEDING`)
+  - no feature uses future records
+- Stable output contract: `fact_demand_features` with deterministic schema and unique key on (`zone_id`, `bucket_start_ts`).
+
+### Feature list
+- Keys: `zone_id`, `bucket_start_ts`
+- Target: `pickup_count`
+- Calendar: `hour_of_day`, `quarter_hour_index`, `day_of_week`, `is_weekend`, `week_of_year`, `month`, `is_holiday`
+- Lags: `lag_1`, `lag_2`, `lag_4`, `lag_96`, `lag_672`
+- Rolling stats: `roll_mean_4`, `roll_mean_8`, `roll_std_8`, `roll_max_16`
+- Metadata: `feature_version`, `created_at`, `run_id`, `source_min_ts`, `source_max_ts`
+
 ## Strict gate policy for Step 1.6
 Backfill commands always enforce `scripts/check_phase1_gate.py` first. Step 1.6 aborts if:
 - Step 1.1-1.5 tests are not passing
@@ -77,6 +95,24 @@ make smoke
 9. `make ingest-backfill-full`
 10. `make ingest-incremental`
 
+## Phase 2 commands (required order)
+1. `make features-time-buckets`
+2. `make features-aggregate`
+3. `make features-calendar`
+4. `make features-lag-roll`
+5. `make features-validate`
+6. `make features-publish`
+7. `make features-build`
+
+Use `.env` or Make overrides for runtime scope:
+- `FEATURE_START_DATE` (inclusive)
+- `FEATURE_END_DATE` (inclusive)
+- `FEATURE_VERSION`
+- `FEATURE_ZONES` (optional comma-separated list)
+- `FEATURE_TIMEZONE`
+- `FEATURE_LAG_NULL_POLICY` (`zero` or `keep_nulls`)
+- `HOLIDAY_REFERENCE_FILE`
+
 ## Common commands
 - `make help`
 - `make check`
@@ -100,3 +136,7 @@ make smoke
   - Run `make ingest-gate-check` and follow reported reasons.
 - Backfill resume:
   - Inspect `ingestion_watermark`; rerun `make ingest-incremental` after resolving failures.
+- Feature quality failures:
+  - Inspect `feature_check_results` by `run_id` and resolve `severity='critical'` failures before publish.
+- Feature rerun determinism:
+  - Re-run the same date interval + `FEATURE_VERSION` and compare row count and aggregate metrics in `fact_demand_features`.

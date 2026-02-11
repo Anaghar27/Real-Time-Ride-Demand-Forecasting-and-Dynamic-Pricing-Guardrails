@@ -11,7 +11,12 @@ VENV_PYTHON := .venv/bin/python
 VENV_PIP := .venv/bin/pip
 VENV_UVICORN := .venv/bin/uvicorn
 
-.PHONY: help setup up down restart logs ps api test lint format typecheck check clean db-shell smoke mlflow-ui urls ingest-sample-download ingest-zone-dim ingest-load-sample ingest-validate ingest-run-sample ingest-rerun-sample ingest-gate-check ingest-backfill-pilot ingest-backfill-full ingest-incremental
+.PHONY: help setup up down restart logs ps api test lint format typecheck check clean db-shell smoke mlflow-ui urls ingest-sample-download ingest-zone-dim ingest-load-sample ingest-validate ingest-run-sample ingest-rerun-sample ingest-gate-check ingest-backfill-pilot ingest-backfill-full ingest-incremental features-time-buckets features-aggregate features-calendar features-lag-roll features-validate features-publish features-build
+
+FEATURE_START_DATE ?= 2024-01-01
+FEATURE_END_DATE ?= 2024-01-07
+FEATURE_VERSION ?= v1
+FEATURE_ZONES ?=
 
 help: ## Show available commands
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "%-12s %s\n", $$1, $$2}'
@@ -131,3 +136,26 @@ ingest-backfill-full: ## Step 1.6 full backfill (gated)
 ingest-incremental: ## Step 1.6 incremental backfill (gated)
 	@$(MAKE) ingest-gate-check
 	@$(VENV_PYTHON) -m src.ingestion.backfill_historical --mode incremental
+
+features-time-buckets: ## Step 2.1 build 15-minute time buckets and zone-time spine
+	@$(VENV_PYTHON) -m src.features.time_buckets --start-date $(FEATURE_START_DATE) --end-date $(FEATURE_END_DATE) --feature-version $(FEATURE_VERSION) --zones "$(FEATURE_ZONES)"
+
+features-aggregate: ## Step 2.2 aggregate pickups and zero-fill target table
+	@$(VENV_PYTHON) -m src.features.aggregate_pickups --start-date $(FEATURE_START_DATE) --end-date $(FEATURE_END_DATE) --feature-version $(FEATURE_VERSION) --zones "$(FEATURE_ZONES)"
+
+features-calendar: ## Step 2.3 add deterministic calendar and holiday features
+	@$(VENV_PYTHON) -m src.features.calendar_features --start-date $(FEATURE_START_DATE) --end-date $(FEATURE_END_DATE) --feature-version $(FEATURE_VERSION) --zones "$(FEATURE_ZONES)"
+
+features-lag-roll: ## Step 2.4 add lag and rolling features
+	@$(VENV_PYTHON) -m src.features.lag_rolling_features --start-date $(FEATURE_START_DATE) --end-date $(FEATURE_END_DATE) --feature-version $(FEATURE_VERSION) --zones "$(FEATURE_ZONES)"
+
+features-validate: ## Step 2.5 quality checks (critical checks hard-fail)
+	@RUN_ID=$$($(VENV_PYTHON) -c "import uuid; print(uuid.uuid4())"); \
+	$(VENV_PYTHON) -m src.features.build_feature_pipeline --start-date $(FEATURE_START_DATE) --end-date $(FEATURE_END_DATE) --feature-version $(FEATURE_VERSION) --zones "$(FEATURE_ZONES)" --run-id $$RUN_ID --dry-run
+
+features-publish: ## Step 2.5 publish fact_demand_features
+	@RUN_ID=$$($(VENV_PYTHON) -c "import uuid; print(uuid.uuid4())"); \
+	$(VENV_PYTHON) -m src.features.build_feature_pipeline --start-date $(FEATURE_START_DATE) --end-date $(FEATURE_END_DATE) --feature-version $(FEATURE_VERSION) --zones "$(FEATURE_ZONES)" --run-id $$RUN_ID
+
+features-build: ## Full chain: 2.1 to 2.5 (build, validate, publish)
+	@$(VENV_PYTHON) -m src.features.build_feature_pipeline --start-date $(FEATURE_START_DATE) --end-date $(FEATURE_END_DATE) --feature-version $(FEATURE_VERSION) --zones "$(FEATURE_ZONES)"
