@@ -60,10 +60,13 @@ def run_feature_quality_checks(params: FeatureParams) -> dict[str, object]:
             {"run_id": params.run_id},
         ).mappings().all()
 
-    critical_failures = [dict(row) for row in rows if row["severity"] == "critical" and not row["passed"]]
-    summary = {
+    check_rows: list[dict[str, object]] = [dict(row) for row in rows]
+    critical_failures: list[dict[str, object]] = [
+        row for row in check_rows if row["severity"] == "critical" and not row["passed"]
+    ]
+    summary: dict[str, object] = {
         "run_id": params.run_id,
-        "checks": [dict(row) for row in rows],
+        "checks": check_rows,
         "critical_failures": critical_failures,
     }
 
