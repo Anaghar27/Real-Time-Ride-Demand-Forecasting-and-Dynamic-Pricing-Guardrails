@@ -11,7 +11,7 @@ VENV_PYTHON := .venv/bin/python
 VENV_PIP := .venv/bin/pip
 VENV_UVICORN := .venv/bin/uvicorn
 
-.PHONY: help setup up down restart logs ps api test lint format typecheck check clean db-shell smoke mlflow-ui urls
+.PHONY: help setup up down restart logs ps api test lint format typecheck check clean db-shell smoke mlflow-ui urls ingest-sample-download ingest-zone-dim ingest-load-sample ingest-validate ingest-run-sample ingest-rerun-sample ingest-gate-check ingest-backfill-pilot ingest-backfill-full ingest-incremental
 
 help: ## Show available commands
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "%-12s %s\n", $$1, $$2}'
@@ -98,3 +98,36 @@ urls: ## Print local service URLs
 	@echo "Prefect:     http://localhost:4200"
 	@echo "Prometheus:  http://localhost:$(PROMETHEUS_PORT)"
 	@echo "Grafana:     http://localhost:$(GRAFANA_PORT)"
+
+ingest-sample-download: ## Step 1.1 download sample TLC and reference files
+	@$(VENV_PYTHON) scripts/fetch_tlc_sample.py
+
+ingest-zone-dim: ## Step 1.3 load zone dimension and coverage report
+	@$(VENV_PYTHON) -m src.ingestion.load_zone_dim
+
+ingest-load-sample: ## Step 1.2 load normalized sample trips
+	@$(VENV_PYTHON) -m src.ingestion.load_raw_trips
+
+ingest-validate: ## Step 1.4 run ingestion checks with hard gate
+	@$(VENV_PYTHON) -m src.ingestion.validate_ingestion
+
+ingest-run-sample: ## Step 1.5 execute idempotent sample ingestion run
+	@$(VENV_PYTHON) -m src.ingestion.load_raw_trips
+
+ingest-rerun-sample: ## Step 1.5 rerun sample ingestion to confirm idempotency
+	@$(VENV_PYTHON) -m src.ingestion.load_raw_trips
+
+ingest-gate-check: ## Verify Phase 1 gate before historical backfill
+	@$(VENV_PYTHON) scripts/check_phase1_gate.py
+
+ingest-backfill-pilot: ## Step 1.6 pilot backfill (gated)
+	@$(MAKE) ingest-gate-check
+	@$(VENV_PYTHON) -m src.ingestion.backfill_historical --mode pilot
+
+ingest-backfill-full: ## Step 1.6 full backfill (gated)
+	@$(MAKE) ingest-gate-check
+	@$(VENV_PYTHON) -m src.ingestion.backfill_historical --mode full
+
+ingest-incremental: ## Step 1.6 incremental backfill (gated)
+	@$(MAKE) ingest-gate-check
+	@$(VENV_PYTHON) -m src.ingestion.backfill_historical --mode incremental

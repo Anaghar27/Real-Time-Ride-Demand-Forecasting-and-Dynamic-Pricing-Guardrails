@@ -1,0 +1,84 @@
+Phase 0 test:
+
+make setup
+make up
+make smoke
+make check
+make down
+
+Phase 1 test:
+
+# 0) Go to repo
+cd "/Users/anaghar/Documents/Portfolio Projects/Real-Time-Ride-Demand-Forecasting-and-Dynamic-Pricing-Guardrails"
+
+# 1) Start prerequisites
+open -a Docker
+until docker info >/dev/null 2>&1; do echo "Waiting for Docker..."; sleep 2; done
+python3.11 --version
+docker --version
+docker compose version
+make --version
+
+# 2) Setup + platform
+make setup
+make up
+make ps
+curl -fsS http://localhost:8000/health
+curl -fsS http://localhost:8000/ready
+
+# 3) Timing helper
+run_timed () {
+  label="$1"; shift
+  start=$(date +%s)
+  echo "=== $label : START $(date) ==="
+  "$@"
+  rc=$?
+  end=$(date +%s)
+  echo "=== $label : END $(date) | elapsed_sec=$((end-start)) | rc=$rc ==="
+  return $rc
+}
+
+# 4) Phase 1.1 -> 1.5 (required order)
+run_timed "1.1 sample download" make ingest-sample-download
+run_timed "1.3 zone dim load" make ingest-zone-dim
+run_timed "1.2 raw sample load" make ingest-load-sample
+run_timed "1.4 validation" make ingest-validate
+run_timed "1.5 run sample" make ingest-run-sample
+run_timed "1.5 rerun sample (idempotency)" make ingest-rerun-sample
+run_timed "gate check" make ingest-gate-check
+
+# 5) Verify 1.1-1.5 in DB
+set -a; source .env; set +a
+docker compose --env-file .env -f infra/docker-compose.yml exec -T postgres \
+psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "
+SELECT source_file,state,rows_read,rows_valid,rows_rejected,load_duration_sec,started_at,completed_at
+FROM ingestion_batch_log
+ORDER BY created_at DESC
+LIMIT 20;"
+
+docker compose --env-file .env -f infra/docker-compose.yml exec -T postgres \
+psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "SELECT COUNT(*) AS raw_trips_count FROM raw_trips;"
+
+docker compose --env-file .env -f infra/docker-compose.yml exec -T postgres \
+psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "SELECT COUNT(*) AS failed_batches FROM ingestion_batch_log WHERE state='failed';"
+
+# 6) Phase 1.6
+run_timed "1.6 pilot backfill" make ingest-backfill-pilot
+run_timed "1.6 full backfill" make ingest-backfill-full
+run_timed "1.6 incremental backfill" make ingest-incremental
+
+# 7) If full/incremental fails, inspect failing check(s)
+docker compose --env-file .env -f infra/docker-compose.yml exec -T postgres \
+psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "
+SELECT batch_id, source_file, state, error_message, completed_at
+FROM ingestion_batch_log
+WHERE state='failed'
+ORDER BY completed_at DESC;"
+
+docker compose --env-file .env -f infra/docker-compose.yml exec -T postgres \
+psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "
+SELECT r.batch_id, r.check_name, r.passed, r.metric_value, r.threshold_value, r.details
+FROM ingestion_check_results r
+JOIN ingestion_batch_log b ON b.batch_id = r.batch_id
+WHERE b.state='failed'
+ORDER BY r.created_at DESC, r.check_name;"

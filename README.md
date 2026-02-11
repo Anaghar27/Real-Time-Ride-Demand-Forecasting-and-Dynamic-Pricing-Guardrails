@@ -1,7 +1,7 @@
 # Real_Time_Ride_Demand_Forecasting_and_Dynamic_Pricing_Guardrails
 
 ## Project overview
-This repository provides a production-style Phase 0 foundation for a local-first ML and MLOps platform focused on real-time ride demand forecasting and dynamic pricing guardrails.
+Production-style local-first ML/MLOps platform for NYC TLC ride-demand forecasting and dynamic pricing guardrails.
 
 ## Tech stack
 - Python 3.11
@@ -10,72 +10,93 @@ This repository provides a production-style Phase 0 foundation for a local-first
 - MLflow
 - Prefect
 - Prometheus + Grafana
-- Evidently
-- Docker + Docker Compose
 - pytest, Ruff, Black, mypy
+- Docker + Docker Compose
 - GitHub Actions
 
-## Phase 0 scope
-- Repository and package structure
-- Local environment bootstrap and pinned dependencies
-- Docker Compose platform for core services
-- Makefile-based developer workflow
-- CI workflow for lint, typecheck, tests
-- Initial API and configuration tests
+## Phase 0 (completed)
+- Repository scaffold and packaging
+- Local developer environment and pinned dependencies
+- Docker Compose platform services
+- Makefile workflow
+- CI checks (lint, typecheck, tests)
+
+## Phase 1 ingestion scope
+1. Step 1.1 sample download and manifest
+2. Step 1.2 raw loader and schema normalization
+3. Step 1.3 zone dimension load and coverage report
+4. Step 1.4 hard-gated ingestion checks
+5. Step 1.5 idempotent rerun-safe ingestion
+6. Step 1.6 historical backfill (strictly locked behind gate)
+
+## Strict gate policy for Step 1.6
+Backfill commands always enforce `scripts/check_phase1_gate.py` first. Step 1.6 aborts if:
+- Step 1.1-1.5 tests are not passing
+- successful sample batches are below threshold
+- unresolved failed batches exist
 
 ## Prerequisites
 - Python 3.11
-- Docker and Docker Compose
+- Docker Desktop / Docker Engine with Compose
 - GNU Make
 - curl
 
 ## Quickstart
-1. Clone the repository.
-2. Review and adjust `.env` values as needed for your machine.
-3. Run local bootstrap:
-   ```bash
-   make setup
-   ```
-4. Start the local platform:
-   ```bash
-   make up
-   ```
-5. Run smoke checks:
-   ```bash
-   make smoke
-   ```
+1. Clone repository.
+2. Review `.env`.
+3. Bootstrap:
+```bash
+make setup
+```
+4. Start platform:
+```bash
+make up
+```
+5. Smoke check:
+```bash
+make smoke
+```
 
 ## Service URLs
 - API: `http://localhost:8000`
 - API docs: `http://localhost:8000/docs`
-- MLflow: `http://localhost:5000`
+- MLflow: `http://localhost:5001`
 - Prefect: `http://localhost:4200`
 - Prometheus: `http://localhost:9090`
-- Grafana: `http://localhost:3000` (admin/admin)
+- Grafana: `http://localhost:3000`
+
+## Phase 1 commands (required order)
+1. `make ingest-sample-download`
+2. `make ingest-zone-dim`
+3. `make ingest-load-sample`
+4. `make ingest-validate`
+5. `make ingest-run-sample`
+6. `make ingest-rerun-sample`
+7. `make ingest-gate-check`
+8. `make ingest-backfill-pilot`
+9. `make ingest-backfill-full`
+10. `make ingest-incremental`
 
 ## Common commands
-- `make help` - list available commands
-- `make setup` - create virtualenv and install dependencies
-- `make up` - start all local services
-- `make down` - stop all local services
-- `make ps` - list compose services
-- `make logs` - tail service logs
-- `make api` - run API locally outside Docker
-- `make check` - run lint, typecheck, tests
-- `make db-shell` - open psql shell in postgres container
-- `make urls` - print local service URLs
+- `make help`
+- `make check`
+- `make logs`
+- `make ps`
+- `make db-shell`
+- `make urls`
 
 ## Troubleshooting
 - Port conflicts:
-  - Update relevant ports in `.env` and restart with `make restart`.
-- Docker daemon not running:
-  - Start Docker Desktop or Docker Engine and rerun `make up`.
-- DB connection issues:
-  - Check `make ps` for postgres health, then inspect logs with `make logs`.
-  - Verify `DATABASE_URL` in `.env` matches runtime mode (local API vs Docker API).
-- Healthcheck failures:
-  - Wait for initial service startup (first run can take longer).
-  - Re-run `make smoke`; if it fails, inspect `make logs` output for the failing service.
-
-## Ready for Phase 1
-With this baseline, the repository is prepared for Phase 1 ingestion pipelines, feature transforms, and orchestration workflows.
+  - Update `.env` ports and run `make restart`.
+- Docker not running:
+  - Start Docker then `make up`.
+- API/DB connectivity:
+  - Check `make ps`, `make logs`, and `DATABASE_URL`.
+- Ingestion check failures:
+  - Query `ingestion_check_results` and `ingestion_rejects` by `batch_id`.
+- Idempotent rerun validation:
+  - Run `make ingest-rerun-sample` and confirm `inserted_or_updated=0` for already succeeded files.
+- Gate failures:
+  - Run `make ingest-gate-check` and follow reported reasons.
+- Backfill resume:
+  - Inspect `ingestion_watermark`; rerun `make ingest-incremental` after resolving failures.

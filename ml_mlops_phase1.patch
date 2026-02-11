@@ -1,0 +1,2431 @@
+diff --git a/.env b/.env
+index efdfb0f..b44559c 100644
+--- a/.env
++++ b/.env
+@@ -13,3 +13,4 @@ API_PORT=8000
+ PREFECT_API_URL=http://localhost:4200/api
+ PROMETHEUS_PORT=9090
+ GRAFANA_PORT=3000
++INGEST_SAMPLE_MAX_ROWS=200000
+diff --git a/.gitignore b/.gitignore
+index 9f18c3e..f0b22a6 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -26,3 +26,6 @@ htmlcov/
+ *.log
+ artifacts/
+ mlruns/
++
++# Local datasets
++data/landing/
+diff --git a/Makefile b/Makefile
+index 7d5f9c7..64fcd04 100644
+--- a/Makefile
++++ b/Makefile
+@@ -11,7 +11,7 @@ VENV_PYTHON := .venv/bin/python
+ VENV_PIP := .venv/bin/pip
+ VENV_UVICORN := .venv/bin/uvicorn
+ 
+-.PHONY: help setup up down restart logs ps api test lint format typecheck check clean db-shell smoke mlflow-ui urls
++.PHONY: help setup up down restart logs ps api test lint format typecheck check clean db-shell smoke mlflow-ui urls ingest-sample-download ingest-zone-dim ingest-load-sample ingest-validate ingest-run-sample ingest-rerun-sample ingest-gate-check ingest-backfill-pilot ingest-backfill-full ingest-incremental
+ 
+ help: ## Show available commands
+ 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "%-12s %s\n", $$1, $$2}'
+@@ -98,3 +98,36 @@ urls: ## Print local service URLs
+ 	@echo "Prefect:     http://localhost:4200"
+ 	@echo "Prometheus:  http://localhost:$(PROMETHEUS_PORT)"
+ 	@echo "Grafana:     http://localhost:$(GRAFANA_PORT)"
++
++ingest-sample-download: ## Step 1.1 download sample TLC and reference files
++	@$(VENV_PYTHON) scripts/fetch_tlc_sample.py
++
++ingest-zone-dim: ## Step 1.3 load zone dimension and coverage report
++	@$(VENV_PYTHON) -m src.ingestion.load_zone_dim
++
++ingest-load-sample: ## Step 1.2 load normalized sample trips
++	@$(VENV_PYTHON) -m src.ingestion.load_raw_trips
++
++ingest-validate: ## Step 1.4 run ingestion checks with hard gate
++	@$(VENV_PYTHON) -m src.ingestion.validate_ingestion
++
++ingest-run-sample: ## Step 1.5 execute idempotent sample ingestion run
++	@$(VENV_PYTHON) -m src.ingestion.load_raw_trips
++
++ingest-rerun-sample: ## Step 1.5 rerun sample ingestion to confirm idempotency
++	@$(VENV_PYTHON) -m src.ingestion.load_raw_trips
++
++ingest-gate-check: ## Verify Phase 1 gate before historical backfill
++	@$(VENV_PYTHON) scripts/check_phase1_gate.py
++
++ingest-backfill-pilot: ## Step 1.6 pilot backfill (gated)
++	@$(MAKE) ingest-gate-check
++	@$(VENV_PYTHON) -m src.ingestion.backfill_historical --mode pilot
++
++ingest-backfill-full: ## Step 1.6 full backfill (gated)
++	@$(MAKE) ingest-gate-check
++	@$(VENV_PYTHON) -m src.ingestion.backfill_historical --mode full
++
++ingest-incremental: ## Step 1.6 incremental backfill (gated)
++	@$(MAKE) ingest-gate-check
++	@$(VENV_PYTHON) -m src.ingestion.backfill_historical --mode incremental
+diff --git a/README.md b/README.md
+index 9b3d9da..f78d7e7 100644
+--- a/README.md
++++ b/README.md
+@@ -1,7 +1,7 @@
+ # Real_Time_Ride_Demand_Forecasting_and_Dynamic_Pricing_Guardrails
+ 
+ ## Project overview
+-This repository provides a production-style Phase 0 foundation for a local-first ML and MLOps platform focused on real-time ride demand forecasting and dynamic pricing guardrails.
++Production-style local-first ML/MLOps platform for NYC TLC ride-demand forecasting and dynamic pricing guardrails.
+ 
+ ## Tech stack
+ - Python 3.11
+@@ -10,72 +10,93 @@ This repository provides a production-style Phase 0 foundation for a local-first
+ - MLflow
+ - Prefect
+ - Prometheus + Grafana
+-- Evidently
+-- Docker + Docker Compose
+ - pytest, Ruff, Black, mypy
++- Docker + Docker Compose
+ - GitHub Actions
+ 
+-## Phase 0 scope
+-- Repository and package structure
+-- Local environment bootstrap and pinned dependencies
+-- Docker Compose platform for core services
+-- Makefile-based developer workflow
+-- CI workflow for lint, typecheck, tests
+-- Initial API and configuration tests
++## Phase 0 (completed)
++- Repository scaffold and packaging
++- Local developer environment and pinned dependencies
++- Docker Compose platform services
++- Makefile workflow
++- CI checks (lint, typecheck, tests)
++
++## Phase 1 ingestion scope
++1. Step 1.1 sample download and manifest
++2. Step 1.2 raw loader and schema normalization
++3. Step 1.3 zone dimension load and coverage report
++4. Step 1.4 hard-gated ingestion checks
++5. Step 1.5 idempotent rerun-safe ingestion
++6. Step 1.6 historical backfill (strictly locked behind gate)
++
++## Strict gate policy for Step 1.6
++Backfill commands always enforce `scripts/check_phase1_gate.py` first. Step 1.6 aborts if:
++- Step 1.1-1.5 tests are not passing
++- successful sample batches are below threshold
++- unresolved failed batches exist
+ 
+ ## Prerequisites
+ - Python 3.11
+-- Docker and Docker Compose
++- Docker Desktop / Docker Engine with Compose
+ - GNU Make
+ - curl
+ 
+ ## Quickstart
+-1. Clone the repository.
+-2. Review and adjust `.env` values as needed for your machine.
+-3. Run local bootstrap:
+-   ```bash
+-   make setup
+-   ```
+-4. Start the local platform:
+-   ```bash
+-   make up
+-   ```
+-5. Run smoke checks:
+-   ```bash
+-   make smoke
+-   ```
++1. Clone repository.
++2. Review `.env`.
++3. Bootstrap:
++```bash
++make setup
++```
++4. Start platform:
++```bash
++make up
++```
++5. Smoke check:
++```bash
++make smoke
++```
+ 
+ ## Service URLs
+ - API: `http://localhost:8000`
+ - API docs: `http://localhost:8000/docs`
+-- MLflow: `http://localhost:5000`
++- MLflow: `http://localhost:5001`
+ - Prefect: `http://localhost:4200`
+ - Prometheus: `http://localhost:9090`
+-- Grafana: `http://localhost:3000` (admin/admin)
++- Grafana: `http://localhost:3000`
++
++## Phase 1 commands (required order)
++1. `make ingest-sample-download`
++2. `make ingest-zone-dim`
++3. `make ingest-load-sample`
++4. `make ingest-validate`
++5. `make ingest-run-sample`
++6. `make ingest-rerun-sample`
++7. `make ingest-gate-check`
++8. `make ingest-backfill-pilot`
++9. `make ingest-backfill-full`
++10. `make ingest-incremental`
+ 
+ ## Common commands
+-- `make help` - list available commands
+-- `make setup` - create virtualenv and install dependencies
+-- `make up` - start all local services
+-- `make down` - stop all local services
+-- `make ps` - list compose services
+-- `make logs` - tail service logs
+-- `make api` - run API locally outside Docker
+-- `make check` - run lint, typecheck, tests
+-- `make db-shell` - open psql shell in postgres container
+-- `make urls` - print local service URLs
++- `make help`
++- `make check`
++- `make logs`
++- `make ps`
++- `make db-shell`
++- `make urls`
+ 
+ ## Troubleshooting
+ - Port conflicts:
+-  - Update relevant ports in `.env` and restart with `make restart`.
+-- Docker daemon not running:
+-  - Start Docker Desktop or Docker Engine and rerun `make up`.
+-- DB connection issues:
+-  - Check `make ps` for postgres health, then inspect logs with `make logs`.
+-  - Verify `DATABASE_URL` in `.env` matches runtime mode (local API vs Docker API).
+-- Healthcheck failures:
+-  - Wait for initial service startup (first run can take longer).
+-  - Re-run `make smoke`; if it fails, inspect `make logs` output for the failing service.
+-
+-## Ready for Phase 1
+-With this baseline, the repository is prepared for Phase 1 ingestion pipelines, feature transforms, and orchestration workflows.
++  - Update `.env` ports and run `make restart`.
++- Docker not running:
++  - Start Docker then `make up`.
++- API/DB connectivity:
++  - Check `make ps`, `make logs`, and `DATABASE_URL`.
++- Ingestion check failures:
++  - Query `ingestion_check_results` and `ingestion_rejects` by `batch_id`.
++- Idempotent rerun validation:
++  - Run `make ingest-rerun-sample` and confirm `inserted_or_updated=0` for already succeeded files.
++- Gate failures:
++  - Run `make ingest-gate-check` and follow reported reasons.
++- Backfill resume:
++  - Inspect `ingestion_watermark`; rerun `make ingest-incremental` after resolving failures.
+diff --git a/pyproject.toml b/pyproject.toml
+index 8927191..e1af074 100644
+--- a/pyproject.toml
++++ b/pyproject.toml
+@@ -29,6 +29,8 @@ check_untyped_defs = true
+ no_implicit_optional = true
+ strict_optional = true
+ mypy_path = "src"
++ignore_missing_imports = true
++disable_error_code = ["import-untyped"]
+ 
+ [tool.pytest.ini_options]
+ minversion = "8.0"
+diff --git a/requirements.txt b/requirements.txt
+index df4cd48..2305c10 100644
+--- a/requirements.txt
++++ b/requirements.txt
+@@ -16,3 +16,4 @@ black==24.10.0
+ ruff==0.9.2
+ mypy==1.14.1
+ requests==2.32.3
++pyarrow==18.1.0
+diff --git a/scripts/check_phase1_gate.py b/scripts/check_phase1_gate.py
+new file mode 100755
+index 0000000..e9609f9
+--- /dev/null
++++ b/scripts/check_phase1_gate.py
+@@ -0,0 +1,44 @@
++#!/usr/bin/env python3
++"""Enforce Phase 1 gate before historical backfill."""
++
++from __future__ import annotations
++
++import argparse
++import json
++import sys
++from pathlib import Path
++
++ROOT_DIR = Path(__file__).resolve().parents[1]
++if str(ROOT_DIR) not in sys.path:
++    sys.path.insert(0, str(ROOT_DIR))
++
++from src.common.db import engine
++from src.ingestion.ddl import apply_ingestion_ddl
++from src.ingestion.gate import evaluate_phase1_gate
++
++
++def parse_args() -> argparse.Namespace:
++    parser = argparse.ArgumentParser(description="Check whether Phase 1 gate is satisfied")
++    parser.add_argument("--min-successful-batches", type=int, default=2)
++    parser.add_argument("--skip-tests", action="store_true")
++    return parser.parse_args()
++
++
++def main() -> None:
++    args = parse_args()
++    apply_ingestion_ddl(engine)
++
++    passed, details = evaluate_phase1_gate(
++        engine,
++        min_successful_batches=args.min_successful_batches,
++        run_tests=not args.skip_tests,
++    )
++    print(json.dumps({"gate_passed": passed, "details": details}, indent=2))
++
++    if not passed:
++        print("Phase 1 gate failed. Step 1.6 is locked until 1.1-1.5 are healthy.", file=sys.stderr)
++        sys.exit(1)
++
++
++if __name__ == "__main__":
++    main()
+diff --git a/scripts/fetch_tlc_sample.py b/scripts/fetch_tlc_sample.py
+new file mode 100755
+index 0000000..30b45b9
+--- /dev/null
++++ b/scripts/fetch_tlc_sample.py
+@@ -0,0 +1,36 @@
++#!/usr/bin/env python3
++"""Download sample TLC files and taxi zone lookup into landing paths."""
++
++from __future__ import annotations
++
++import argparse
++import json
++import sys
++from pathlib import Path
++
++ROOT_DIR = Path(__file__).resolve().parents[1]
++if str(ROOT_DIR) not in sys.path:
++    sys.path.insert(0, str(ROOT_DIR))
++
++from src.ingestion.fetch import download_sample_files
++
++
++def parse_args() -> argparse.Namespace:
++    parser = argparse.ArgumentParser(description="Fetch sample TLC files for ingestion pilot")
++    parser.add_argument(
++        "--months",
++        nargs="+",
++        default=["2024-01", "2024-02", "2024-03"],
++        help="Year-month entries (YYYY-MM) to download for pilot",
++    )
++    return parser.parse_args()
++
++
++def main() -> None:
++    args = parse_args()
++    manifest_rows = download_sample_files(args.months)
++    print(json.dumps({"files_recorded": len(manifest_rows), "months": args.months}, indent=2))
++
++
++if __name__ == "__main__":
++    main()
+diff --git a/sql/ddl/dim_zone.sql b/sql/ddl/dim_zone.sql
+new file mode 100644
+index 0000000..943e6bf
+--- /dev/null
++++ b/sql/ddl/dim_zone.sql
+@@ -0,0 +1,15 @@
++CREATE TABLE IF NOT EXISTS dim_zone (
++    location_id INTEGER PRIMARY KEY,
++    borough TEXT NOT NULL,
++    zone TEXT NOT NULL,
++    service_zone TEXT,
++    ingested_at TIMESTAMPTZ NOT NULL
++);
++
++CREATE TABLE IF NOT EXISTS zone_join_coverage_report (
++    id BIGSERIAL PRIMARY KEY,
++    reported_at TIMESTAMPTZ NOT NULL,
++    total_rows BIGINT NOT NULL,
++    pickup_coverage_pct DOUBLE PRECISION NOT NULL,
++    dropoff_coverage_pct DOUBLE PRECISION NOT NULL
++);
+diff --git a/sql/ddl/ingestion_batch_log.sql b/sql/ddl/ingestion_batch_log.sql
+new file mode 100644
+index 0000000..d7cc327
+--- /dev/null
++++ b/sql/ddl/ingestion_batch_log.sql
+@@ -0,0 +1,23 @@
++CREATE TABLE IF NOT EXISTS ingestion_batch_log (
++    batch_id TEXT PRIMARY KEY,
++    batch_key TEXT NOT NULL UNIQUE,
++    source_name TEXT NOT NULL,
++    source_file TEXT NOT NULL,
++    checksum TEXT NOT NULL,
++    state TEXT NOT NULL CHECK (state IN ('discovered', 'running', 'failed', 'succeeded')),
++    rows_read INTEGER DEFAULT 0,
++    rows_valid INTEGER DEFAULT 0,
++    rows_rejected INTEGER DEFAULT 0,
++    load_duration_sec DOUBLE PRECISION DEFAULT 0,
++    check_pass_rate DOUBLE PRECISION DEFAULT 0,
++    error_message TEXT,
++    started_at TIMESTAMPTZ,
++    completed_at TIMESTAMPTZ,
++    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
++);
++
++CREATE INDEX IF NOT EXISTS idx_ingestion_batch_log_state
++    ON ingestion_batch_log (state);
++
++CREATE INDEX IF NOT EXISTS idx_ingestion_batch_log_source_file
++    ON ingestion_batch_log (source_file);
+diff --git a/sql/ddl/ingestion_check_results.sql b/sql/ddl/ingestion_check_results.sql
+new file mode 100644
+index 0000000..dfd51ee
+--- /dev/null
++++ b/sql/ddl/ingestion_check_results.sql
+@@ -0,0 +1,27 @@
++CREATE TABLE IF NOT EXISTS ingestion_check_results (
++    id BIGSERIAL PRIMARY KEY,
++    batch_id TEXT NOT NULL REFERENCES ingestion_batch_log(batch_id),
++    check_name TEXT NOT NULL,
++    passed BOOLEAN NOT NULL,
++    metric_value DOUBLE PRECISION,
++    threshold_value DOUBLE PRECISION,
++    details JSONB NOT NULL,
++    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
++);
++
++CREATE INDEX IF NOT EXISTS idx_ingestion_check_results_batch
++    ON ingestion_check_results (batch_id, check_name);
++
++CREATE TABLE IF NOT EXISTS ingestion_rejects (
++    id BIGSERIAL PRIMARY KEY,
++    ingest_batch_id TEXT NOT NULL REFERENCES ingestion_batch_log(batch_id),
++    source_file TEXT NOT NULL,
++    source_row_number INTEGER NOT NULL,
++    check_name TEXT NOT NULL,
++    reason TEXT NOT NULL,
++    raw_payload JSONB NOT NULL,
++    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
++);
++
++CREATE INDEX IF NOT EXISTS idx_ingestion_rejects_batch
++    ON ingestion_rejects (ingest_batch_id);
+diff --git a/sql/ddl/ingestion_watermark.sql b/sql/ddl/ingestion_watermark.sql
+new file mode 100644
+index 0000000..1d7dae6
+--- /dev/null
++++ b/sql/ddl/ingestion_watermark.sql
+@@ -0,0 +1,5 @@
++CREATE TABLE IF NOT EXISTS ingestion_watermark (
++    dataset_name TEXT PRIMARY KEY,
++    latest_successful_period TEXT NOT NULL,
++    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
++);
+diff --git a/sql/ddl/raw_trips.sql b/sql/ddl/raw_trips.sql
+new file mode 100644
+index 0000000..3c4b885
+--- /dev/null
++++ b/sql/ddl/raw_trips.sql
+@@ -0,0 +1,29 @@
++CREATE TABLE IF NOT EXISTS raw_trips (
++    id BIGSERIAL PRIMARY KEY,
++    vendor_id INTEGER,
++    pickup_datetime TIMESTAMPTZ NOT NULL,
++    dropoff_datetime TIMESTAMPTZ NOT NULL,
++    pickup_location_id INTEGER,
++    dropoff_location_id INTEGER,
++    rate_code_id INTEGER,
++    passenger_count INTEGER,
++    trip_distance DOUBLE PRECISION,
++    fare_amount DOUBLE PRECISION,
++    total_amount DOUBLE PRECISION,
++    payment_type INTEGER,
++    store_and_fwd_flag TEXT,
++    ingest_batch_id TEXT NOT NULL REFERENCES ingestion_batch_log(batch_id),
++    source_file TEXT NOT NULL,
++    source_row_number INTEGER NOT NULL,
++    ingested_at TIMESTAMPTZ NOT NULL,
++    CONSTRAINT uq_raw_trips_source_row UNIQUE (source_file, source_row_number)
++);
++
++CREATE INDEX IF NOT EXISTS idx_raw_trips_pickup_datetime
++    ON raw_trips (pickup_datetime);
++
++CREATE INDEX IF NOT EXISTS idx_raw_trips_pickup_location_id
++    ON raw_trips (pickup_location_id);
++
++CREATE INDEX IF NOT EXISTS idx_raw_trips_ingest_batch_id
++    ON raw_trips (ingest_batch_id);
+diff --git a/sql/ddl/stg_raw_trips.sql b/sql/ddl/stg_raw_trips.sql
+new file mode 100644
+index 0000000..7a17839
+--- /dev/null
++++ b/sql/ddl/stg_raw_trips.sql
+@@ -0,0 +1,21 @@
++CREATE TABLE IF NOT EXISTS stg_raw_trips (
++    vendor_id INTEGER,
++    pickup_datetime TIMESTAMPTZ,
++    dropoff_datetime TIMESTAMPTZ,
++    pickup_location_id INTEGER,
++    dropoff_location_id INTEGER,
++    rate_code_id INTEGER,
++    passenger_count INTEGER,
++    trip_distance DOUBLE PRECISION,
++    fare_amount DOUBLE PRECISION,
++    total_amount DOUBLE PRECISION,
++    payment_type INTEGER,
++    store_and_fwd_flag TEXT,
++    ingest_batch_id TEXT NOT NULL,
++    source_file TEXT NOT NULL,
++    source_row_number INTEGER NOT NULL,
++    ingested_at TIMESTAMPTZ NOT NULL
++);
++
++CREATE INDEX IF NOT EXISTS idx_stg_raw_trips_batch
++    ON stg_raw_trips (ingest_batch_id);
+diff --git a/src/common/schema_map.py b/src/common/schema_map.py
+new file mode 100644
+index 0000000..ce13453
+--- /dev/null
++++ b/src/common/schema_map.py
+@@ -0,0 +1,99 @@
++"""Schema normalization for NYC TLC trip datasets."""
++
++from __future__ import annotations
++
++import re
++from datetime import UTC, datetime
++from pathlib import Path
++
++import pandas as pd
++
++COLUMN_ALIASES = {
++    "vendorid": "vendor_id",
++    "vendor_id": "vendor_id",
++    "tpep_pickup_datetime": "pickup_datetime",
++    "pickup_datetime": "pickup_datetime",
++    "lpep_pickup_datetime": "pickup_datetime",
++    "tpep_dropoff_datetime": "dropoff_datetime",
++    "dropoff_datetime": "dropoff_datetime",
++    "lpep_dropoff_datetime": "dropoff_datetime",
++    "pulocationid": "pickup_location_id",
++    "pickup_location_id": "pickup_location_id",
++    "dolocationid": "dropoff_location_id",
++    "dropoff_location_id": "dropoff_location_id",
++    "ratecodeid": "rate_code_id",
++    "rate_code_id": "rate_code_id",
++    "passenger_count": "passenger_count",
++    "trip_distance": "trip_distance",
++    "fare_amount": "fare_amount",
++    "total_amount": "total_amount",
++    "payment_type": "payment_type",
++    "store_and_fwd_flag": "store_and_fwd_flag",
++}
++
++CANONICAL_TRIP_COLUMNS = [
++    "vendor_id",
++    "pickup_datetime",
++    "dropoff_datetime",
++    "pickup_location_id",
++    "dropoff_location_id",
++    "rate_code_id",
++    "passenger_count",
++    "trip_distance",
++    "fare_amount",
++    "total_amount",
++    "payment_type",
++    "store_and_fwd_flag",
++]
++
++TRIP_COLUMNS_WITH_META = CANONICAL_TRIP_COLUMNS + [
++    "ingest_batch_id",
++    "source_file",
++    "source_row_number",
++    "ingested_at",
++]
++
++
++def _to_snake_case(value: str) -> str:
++    normalized = re.sub(r"[^a-zA-Z0-9]+", "_", value.strip()).strip("_")
++    return normalized.lower()
++
++
++def normalize_trip_dataframe(df: pd.DataFrame, source_file: Path, ingest_batch_id: str) -> pd.DataFrame:
++    """Normalize TLC trip dataframe to canonical schema and metadata."""
++
++    renamed_columns = {
++        column: COLUMN_ALIASES.get(_to_snake_case(column), _to_snake_case(column)) for column in df.columns
++    }
++    normalized = df.rename(columns=renamed_columns).copy()
++
++    for column in CANONICAL_TRIP_COLUMNS:
++        if column not in normalized.columns:
++            normalized[column] = pd.NA
++
++    normalized["pickup_datetime"] = pd.to_datetime(normalized["pickup_datetime"], errors="coerce")
++    normalized["dropoff_datetime"] = pd.to_datetime(normalized["dropoff_datetime"], errors="coerce")
++
++    int_columns = [
++        "vendor_id",
++        "pickup_location_id",
++        "dropoff_location_id",
++        "rate_code_id",
++        "passenger_count",
++        "payment_type",
++    ]
++    for column in int_columns:
++        normalized[column] = pd.to_numeric(normalized[column], errors="coerce")
++
++    float_columns = ["trip_distance", "fare_amount", "total_amount"]
++    for column in float_columns:
++        normalized[column] = pd.to_numeric(normalized[column], errors="coerce")
++
++    normalized["store_and_fwd_flag"] = normalized["store_and_fwd_flag"].astype("string")
++
++    normalized["ingest_batch_id"] = ingest_batch_id
++    normalized["source_file"] = str(source_file)
++    normalized["source_row_number"] = pd.Series(range(1, len(normalized) + 1), dtype="int64")
++    normalized["ingested_at"] = datetime.now(tz=UTC)
++
++    return normalized[TRIP_COLUMNS_WITH_META]
+diff --git a/src/ingestion/backfill_historical.py b/src/ingestion/backfill_historical.py
+new file mode 100644
+index 0000000..b2b6a9c
+--- /dev/null
++++ b/src/ingestion/backfill_historical.py
+@@ -0,0 +1,292 @@
++"""Historical backfill runner with strict Phase 1 gate enforcement."""
++
++from __future__ import annotations
++
++import argparse
++import json
++import os
++import sys
++import time
++from dataclasses import dataclass
++from datetime import UTC, date, datetime
++from typing import Any, Literal
++
++import requests
++from sqlalchemy import text
++
++from src.common.db import engine
++from src.ingestion.ddl import apply_ingestion_ddl
++from src.ingestion.fetch import download_month_file
++from src.ingestion.gate import evaluate_phase1_gate
++from src.ingestion.load_raw_trips import process_trip_file
++
++Mode = Literal["pilot", "full", "incremental"]
++
++
++@dataclass
++class BackfillResult:
++    period: str
++    state: str
++    attempts: int
++    reason_code: str | None
++
++
++class BackfillRunError(RuntimeError):
++    """Raised when backfill cannot continue and should fail gracefully."""
++
++    def __init__(self, message: str, payload: dict[str, Any]) -> None:
++        super().__init__(message)
++        self.payload = payload
++
++
++def _parse_period(period: str) -> date:
++    year, month = period.split("-")
++    return date(int(year), int(month), 1)
++
++
++def _format_period(value: date) -> str:
++    return value.strftime("%Y-%m")
++
++
++def _iter_months(start: date, end: date) -> list[str]:
++    months: list[str] = []
++    current = date(start.year, start.month, 1)
++    boundary = date(end.year, end.month, 1)
++    while current <= boundary:
++        months.append(_format_period(current))
++        if current.month == 12:
++            current = date(current.year + 1, 1, 1)
++        else:
++            current = date(current.year, current.month + 1, 1)
++    return months
++
++
++def _latest_complete_month() -> date:
++    now = datetime.now(tz=UTC)
++    if now.month == 1:
++        return date(now.year - 1, 12, 1)
++    return date(now.year, now.month - 1, 1)
++
++
++def _get_watermark(dataset_name: str) -> str | None:
++    with engine.begin() as connection:
++        value = connection.execute(
++            text(
++                "SELECT latest_successful_period FROM ingestion_watermark WHERE dataset_name = :dataset_name"
++            ),
++            {"dataset_name": dataset_name},
++        ).scalar()
++    return str(value) if value else None
++
++
++def _set_watermark(dataset_name: str, period: str) -> None:
++    with engine.begin() as connection:
++        connection.execute(
++            text(
++                """
++                INSERT INTO ingestion_watermark (dataset_name, latest_successful_period, updated_at)
++                VALUES (:dataset_name, :period, :updated_at)
++                ON CONFLICT (dataset_name)
++                DO UPDATE SET
++                    latest_successful_period = EXCLUDED.latest_successful_period,
++                    updated_at = EXCLUDED.updated_at
++                """
++            ),
++            {
++                "dataset_name": dataset_name,
++                "period": period,
++                "updated_at": datetime.now(tz=UTC),
++            },
++        )
++
++
++def _resolve_periods(mode: Mode, full_months: int, pilot_months: list[str], dataset_name: str) -> list[str]:
++    if mode == "pilot":
++        return pilot_months
++
++    latest_month = _latest_complete_month()
++    if mode == "full":
++        end_period = latest_month
++        start_year = end_period.year
++        start_month = end_period.month - (full_months - 1)
++        while start_month <= 0:
++            start_month += 12
++            start_year -= 1
++        return _iter_months(date(start_year, start_month, 1), end_period)
++
++    watermark = _get_watermark(dataset_name)
++    if watermark is None:
++        raise RuntimeError("No watermark found for incremental mode. Run pilot/full first.")
++
++    watermark_date = _parse_period(watermark)
++    if watermark_date >= latest_month:
++        return []
++
++    if watermark_date.month == 12:
++        next_month = date(watermark_date.year + 1, 1, 1)
++    else:
++        next_month = date(watermark_date.year, watermark_date.month + 1, 1)
++    return _iter_months(next_month, latest_month)
++
++
++def _assert_gate() -> None:
++    gate_passed, details = evaluate_phase1_gate(engine, min_successful_batches=2, run_tests=True)
++    if not gate_passed:
++        raise RuntimeError(
++            f"Phase 1 gate failed. Step 1.6 is blocked. Reasons: {details.get('reasons', [])}"
++        )
++
++
++def run_backfill(
++    mode: Mode,
++    *,
++    full_months: int,
++    max_retries: int,
++    retry_delay_seconds: int,
++    max_rows_per_file: int | None,
++) -> dict[str, object]:
++    """Run pilot/full/incremental backfill using common ingestion pipeline."""
++
++    apply_ingestion_ddl(engine)
++    _assert_gate()
++
++    dataset_name = "yellow_taxi"
++    pilot_months = ["2024-01", "2024-02", "2024-03"]
++    periods = _resolve_periods(mode, full_months, pilot_months, dataset_name)
++
++    if not periods:
++        return {"mode": mode, "message": "no periods to process", "results": []}
++
++    results: list[BackfillResult] = []
++    unavailable_periods: list[str] = []
++    for period in periods:
++        try:
++            source_file = download_month_file(period)
++        except requests.HTTPError as exc:
++            status_code = exc.response.status_code if exc.response is not None else None
++            if status_code in {403, 404}:
++                unavailable_periods.append(period)
++                results.append(
++                    BackfillResult(
++                        period=period,
++                        state="failed",
++                        attempts=0,
++                        reason_code="source_unavailable",
++                    )
++                )
++                continue
++            raise
++
++        attempts = 0
++        completed = False
++        reason_code: str | None = None
++        last_error: str | None = None
++
++        while attempts < max_retries and not completed:
++            attempts += 1
++            try:
++                summary = process_trip_file(
++                    source_file,
++                    validate_only=False,
++                    max_rows_per_file=max_rows_per_file,
++                )
++                if summary["state"] != "succeeded":
++                    reason_code = "validation_failure"
++                    last_error = summary.get("message", "validation checks failed")
++                    break
++
++                _set_watermark(dataset_name, period)
++                results.append(
++                    BackfillResult(period=period, state="succeeded", attempts=attempts, reason_code=None)
++                )
++                completed = True
++            except Exception as exc:  # pragma: no cover - exercised in integration paths
++                last_error = str(exc)
++                if attempts >= max_retries:
++                    reason_code = "permanent_failure"
++                    break
++                reason_code = "transient_retry"
++                time.sleep(retry_delay_seconds)
++
++        if not completed:
++            results.append(
++                BackfillResult(period=period, state="failed", attempts=attempts, reason_code=reason_code)
++            )
++            payload = {
++                "status": "failed",
++                "message": f"Backfill failed for {period} due to {reason_code}",
++                "mode": mode,
++                "failed_period": period,
++                "reason_code": reason_code,
++                "error": last_error,
++                "watermark": _get_watermark(dataset_name),
++                "results": [result.__dict__ for result in results],
++            }
++            raise BackfillRunError(
++                f"Backfill failed for {period} with reason_code={reason_code}",
++                payload,
++            )
++
++    status = "succeeded_with_warnings" if unavailable_periods else "succeeded"
++    message = (
++        f"completed with unavailable months: {', '.join(unavailable_periods)}"
++        if unavailable_periods
++        else "completed"
++    )
++    return {
++        "status": status,
++        "message": message,
++        "mode": mode,
++        "periods": periods,
++        "unavailable_periods": unavailable_periods,
++        "watermark": _get_watermark(dataset_name),
++        "results": [result.__dict__ for result in results],
++    }
++
++
++def parse_args() -> argparse.Namespace:
++    parser = argparse.ArgumentParser(description="Historical backfill ingestion with gate enforcement")
++    parser.add_argument("--mode", choices=["pilot", "full", "incremental"], required=True)
++    parser.add_argument("--full-months", type=int, default=12)
++    parser.add_argument("--max-retries", type=int, default=3)
++    parser.add_argument("--retry-delay-seconds", type=int, default=5)
++    parser.add_argument(
++        "--max-rows-per-file",
++        type=int,
++        default=int(os.getenv("INGEST_SAMPLE_MAX_ROWS", "200000")),
++        help="Use 0 for full-file ingestion",
++    )
++    return parser.parse_args()
++
++
++def main() -> None:
++    args = parse_args()
++    max_rows = None if args.max_rows_per_file == 0 else args.max_rows_per_file
++    try:
++        result = run_backfill(
++            args.mode,
++            full_months=args.full_months,
++            max_retries=args.max_retries,
++            retry_delay_seconds=args.retry_delay_seconds,
++            max_rows_per_file=max_rows,
++        )
++        print(json.dumps(result, indent=2))
++    except BackfillRunError as exc:
++        print(f"ERROR: {exc}", file=sys.stderr)
++        print(json.dumps(exc.payload, indent=2), file=sys.stderr)
++        raise SystemExit(1) from None
++    except Exception as exc:  # pragma: no cover - defensive fallback for CLI robustness
++        payload = {
++            "status": "failed",
++            "message": "Backfill failed due to an unexpected error",
++            "mode": args.mode,
++            "reason_code": "unexpected_error",
++            "error": str(exc),
++        }
++        print(f"ERROR: {payload['message']}: {exc}", file=sys.stderr)
++        print(json.dumps(payload, indent=2), file=sys.stderr)
++        raise SystemExit(1) from None
++
++
++if __name__ == "__main__":
++    main()
+diff --git a/src/ingestion/checks.py b/src/ingestion/checks.py
+new file mode 100644
+index 0000000..8c195cc
+--- /dev/null
++++ b/src/ingestion/checks.py
+@@ -0,0 +1,176 @@
++"""Batch-level data quality checks for ingestion pipeline."""
++
++from __future__ import annotations
++
++from dataclasses import dataclass
++from typing import Any
++
++import pandas as pd
++from sqlalchemy import text
++from sqlalchemy.engine import Engine
++
++KEY_COLUMNS = ["pickup_datetime", "dropoff_datetime", "pickup_location_id", "dropoff_location_id"]
++
++
++@dataclass
++class CheckResult:
++    check_name: str
++    passed: bool
++    metric_value: float
++    threshold_value: float
++    details: dict[str, Any]
++
++
++def _table_exists(engine: Engine, table_name: str) -> bool:
++    query = text(
++        """
++        SELECT EXISTS (
++            SELECT 1
++            FROM information_schema.tables
++            WHERE table_schema = 'public' AND table_name = :table_name
++        )
++        """
++    )
++    with engine.begin() as connection:
++        return bool(connection.execute(query, {"table_name": table_name}).scalar())
++
++
++def run_ingestion_checks(
++    df: pd.DataFrame,
++    engine: Engine,
++    *,
++    null_threshold: float = 0.05,
++    duplicate_threshold: float = 0.0,
++    timestamp_invalid_threshold: float = 0.05,
++    negative_value_threshold: float = 0.03,
++    zone_invalid_threshold: float = 0.05,
++) -> tuple[bool, list[CheckResult], pd.DataFrame]:
++    """Execute required quality checks and return pass/fail plus rejects."""
++
++    check_results: list[CheckResult] = []
++    reject_reasons: dict[int, list[str]] = {}
++
++    missing_required = [column for column in KEY_COLUMNS if column not in df.columns]
++    check_results.append(
++        CheckResult(
++            check_name="required_column_presence",
++            passed=len(missing_required) == 0,
++            metric_value=float(len(missing_required)),
++            threshold_value=0.0,
++            details={"missing_columns": missing_required},
++        )
++    )
++    if missing_required:
++        return False, check_results, pd.DataFrame()
++
++    invalid_timestamp_mask = (
++        df["pickup_datetime"].isna()
++        | df["dropoff_datetime"].isna()
++        | (df["dropoff_datetime"] < df["pickup_datetime"])
++    )
++    invalid_timestamp_rate = float(invalid_timestamp_mask.mean()) if len(df) else 0.0
++    check_results.append(
++        CheckResult(
++            check_name="pickup_dropoff_timestamp_validity",
++            passed=invalid_timestamp_rate <= timestamp_invalid_threshold,
++            metric_value=invalid_timestamp_rate,
++            threshold_value=timestamp_invalid_threshold,
++            details={"invalid_rows": int(invalid_timestamp_mask.sum())},
++        )
++    )
++
++    for column in KEY_COLUMNS:
++        null_rate = float(df[column].isna().mean()) if len(df) else 0.0
++        check_results.append(
++            CheckResult(
++                check_name=f"null_threshold_{column}",
++                passed=null_rate <= null_threshold,
++                metric_value=null_rate,
++                threshold_value=null_threshold,
++                details={"null_rows": int(df[column].isna().sum())},
++            )
++        )
++
++    negative_mask = (df["fare_amount"].fillna(0) < 0) | (df["trip_distance"].fillna(0) < 0)
++    negative_rate = float(negative_mask.mean()) if len(df) else 0.0
++    check_results.append(
++        CheckResult(
++            check_name="nonnegative_fare_and_distance",
++            passed=negative_rate <= negative_value_threshold,
++            metric_value=negative_rate,
++            threshold_value=negative_value_threshold,
++            details={"invalid_rows": int(negative_mask.sum())},
++        )
++    )
++
++    duplicate_rate = (
++        float(df.duplicated(subset=["source_file", "source_row_number"]).mean()) if len(df) else 0.0
++    )
++    check_results.append(
++        CheckResult(
++            check_name="duplicate_threshold",
++            passed=duplicate_rate <= duplicate_threshold,
++            metric_value=duplicate_rate,
++            threshold_value=duplicate_threshold,
++            details={"duplicate_rows": int(df.duplicated(subset=["source_file", "source_row_number"]).sum())},
++        )
++    )
++
++    zone_check_passed = True
++    zone_details: dict[str, Any] = {"checked": False}
++    if _table_exists(engine, "dim_zone"):
++        with engine.begin() as connection:
++            zone_count = int(connection.execute(text("SELECT COUNT(*) FROM dim_zone")).scalar() or 0)
++        if zone_count > 0:
++            zone_details["checked"] = True
++            valid_zone_ids = set(
++                pd.read_sql("SELECT location_id FROM dim_zone", con=engine)["location_id"].astype("Int64")
++            )
++            pickup_invalid = ~df["pickup_location_id"].astype("Int64").isin(valid_zone_ids)
++            dropoff_invalid = ~df["dropoff_location_id"].astype("Int64").isin(valid_zone_ids)
++            invalid_zone_rate = float((pickup_invalid | dropoff_invalid).mean()) if len(df) else 0.0
++            zone_check_passed = invalid_zone_rate <= zone_invalid_threshold
++            zone_details.update(
++                {
++                    "invalid_zone_rate": invalid_zone_rate,
++                    "invalid_rows": int((pickup_invalid | dropoff_invalid).sum()),
++                }
++            )
++            for row_index in df.index[pickup_invalid | dropoff_invalid].tolist():
++                reject_reasons.setdefault(int(row_index), []).append("zone_id_validity")
++
++    check_results.append(
++        CheckResult(
++            check_name="zone_id_validity",
++            passed=zone_check_passed,
++            metric_value=float(zone_details.get("invalid_zone_rate", 0.0)),
++            threshold_value=zone_invalid_threshold,
++            details=zone_details,
++        )
++    )
++
++    row_level_masks = {
++        "pickup_dropoff_timestamp_validity": invalid_timestamp_mask,
++        "nonnegative_fare_and_distance": negative_mask,
++    }
++    for reason, mask in row_level_masks.items():
++        for row_index in df.index[mask].tolist():
++            reject_reasons.setdefault(int(row_index), []).append(reason)
++
++    rejects = []
++    for row_index, reasons in reject_reasons.items():
++        row = df.loc[row_index]
++        rejects.append(
++            {
++                "ingest_batch_id": row["ingest_batch_id"],
++                "source_file": row["source_file"],
++                "source_row_number": int(row["source_row_number"]),
++                "check_name": ";".join(sorted(set(reasons))),
++                "reason": "validation_failed",
++                "raw_payload": row.to_json(date_format="iso"),
++            }
++        )
++
++    rejects_df = pd.DataFrame(rejects)
++    overall_passed = all(result.passed for result in check_results)
++    return overall_passed, check_results, rejects_df
+diff --git a/src/ingestion/ddl.py b/src/ingestion/ddl.py
+new file mode 100644
+index 0000000..fed534d
+--- /dev/null
++++ b/src/ingestion/ddl.py
+@@ -0,0 +1,26 @@
++"""DDL helpers for ingestion tables."""
++
++from __future__ import annotations
++
++from pathlib import Path
++
++from sqlalchemy.engine import Engine
++
++DDL_ORDER = [
++    "ingestion_batch_log.sql",
++    "ingestion_check_results.sql",
++    "stg_raw_trips.sql",
++    "raw_trips.sql",
++    "dim_zone.sql",
++    "ingestion_watermark.sql",
++]
++
++
++def apply_ingestion_ddl(engine: Engine, ddl_dir: Path | None = None) -> None:
++    """Apply ingestion DDL files in deterministic order."""
++
++    ddl_path = ddl_dir or Path("sql/ddl")
++    with engine.begin() as connection:
++        for ddl_file in DDL_ORDER:
++            sql_text = (ddl_path / ddl_file).read_text(encoding="utf-8")
++            connection.exec_driver_sql(sql_text)
+diff --git a/src/ingestion/fetch.py b/src/ingestion/fetch.py
+new file mode 100644
+index 0000000..dea102f
+--- /dev/null
++++ b/src/ingestion/fetch.py
+@@ -0,0 +1,116 @@
++"""Dataset fetch utilities for NYC TLC ingestion."""
++
++from __future__ import annotations
++
++import json
++from dataclasses import dataclass
++from datetime import UTC, datetime
++from pathlib import Path
++from typing import Any
++
++import requests
++
++from src.ingestion.utils import sha256sum
++
++TLC_BASE_URL = "https://d37ci6vzurychx.cloudfront.net/trip-data"
++ZONE_LOOKUP_URL = "https://d37ci6vzurychx.cloudfront.net/misc/taxi_zone_lookup.csv"
++
++
++@dataclass(frozen=True)
++class SourceFile:
++    source_name: str
++    url: str
++    destination: Path
++
++
++def build_sample_sources(months: list[str]) -> list[SourceFile]:
++    """Build source descriptors for selected year-month strings."""
++
++    sources: list[SourceFile] = []
++    for year_month in months:
++        year, month = year_month.split("-")
++        filename = f"yellow_tripdata_{year_month}.parquet"
++        destination = Path("data/landing/tlc") / f"year={year}" / f"month={month}" / filename
++        sources.append(
++            SourceFile(
++                source_name="yellow_taxi",
++                url=f"{TLC_BASE_URL}/{filename}",
++                destination=destination,
++            )
++        )
++
++    sources.append(
++        SourceFile(
++            source_name="taxi_zone_lookup",
++            url=ZONE_LOOKUP_URL,
++            destination=Path("data/landing/reference/taxi_zone_lookup.csv"),
++        )
++    )
++    return sources
++
++
++def download_month_file(year_month: str) -> Path:
++    """Ensure a single TLC month file exists in landing path and return it."""
++
++    month_source = build_sample_sources([year_month])[0]
++    if not month_source.destination.exists():
++        _download_file(month_source.url, month_source.destination)
++    return month_source.destination
++
++
++def _download_file(url: str, destination: Path, timeout_seconds: int = 60) -> None:
++    destination.parent.mkdir(parents=True, exist_ok=True)
++
++    response = requests.get(url, timeout=timeout_seconds, stream=True)
++    response.raise_for_status()
++    with destination.open("wb") as file_obj:
++        for chunk in response.iter_content(chunk_size=1024 * 1024):
++            if chunk:
++                file_obj.write(chunk)
++
++
++def _load_manifest(manifest_path: Path) -> dict[str, dict[str, Any]]:
++    if not manifest_path.exists():
++        return {}
++
++    entries: dict[str, dict[str, Any]] = {}
++    for line in manifest_path.read_text(encoding="utf-8").splitlines():
++        if not line.strip():
++            continue
++        payload = json.loads(line)
++        key = f"{payload['source_name']}::{payload['file_path']}::{payload['checksum']}"
++        entries[key] = payload
++    return entries
++
++
++def download_sample_files(months: list[str]) -> list[dict[str, Any]]:
++    """Download sample files and update immutable manifest rows."""
++
++    manifest_path = Path("data/landing/manifest.jsonl")
++    existing = _load_manifest(manifest_path)
++    discovered: list[dict[str, Any]] = []
++
++    for source in build_sample_sources(months):
++        if not source.destination.exists():
++            _download_file(source.url, source.destination)
++
++        checksum = sha256sum(source.destination)
++        size = source.destination.stat().st_size
++        payload = {
++            "source_name": source.source_name,
++            "file_path": str(source.destination),
++            "checksum": checksum,
++            "file_size": size,
++            "discovered_at": datetime.now(tz=UTC).isoformat(),
++        }
++        key = f"{payload['source_name']}::{payload['file_path']}::{payload['checksum']}"
++        if key not in existing:
++            existing[key] = payload
++            discovered.append(payload)
++
++    manifest_path.parent.mkdir(parents=True, exist_ok=True)
++    with manifest_path.open("w", encoding="utf-8") as file_obj:
++        for record in sorted(existing.values(), key=lambda item: (item["source_name"], item["file_path"])):
++            file_obj.write(json.dumps(record) + "\n")
++
++    return list(existing.values())
+diff --git a/src/ingestion/gate.py b/src/ingestion/gate.py
+new file mode 100644
+index 0000000..d913607
+--- /dev/null
++++ b/src/ingestion/gate.py
+@@ -0,0 +1,74 @@
++"""Phase 1 gate checks prior to historical backfill."""
++
++from __future__ import annotations
++
++import subprocess
++from typing import Any
++
++from sqlalchemy import text
++from sqlalchemy.engine import Engine
++
++
++def _run_phase1_tests() -> tuple[bool, str]:
++    command = [".venv/bin/python", "-m", "pytest", "tests/unit", "tests/integration", "-q"]
++    result = subprocess.run(command, capture_output=True, text=True)
++    output = (result.stdout + "\n" + result.stderr).strip()
++    return result.returncode == 0, output
++
++
++def evaluate_phase1_gate(
++    engine: Engine,
++    *,
++    min_successful_batches: int = 2,
++    run_tests: bool = True,
++) -> tuple[bool, dict[str, Any]]:
++    """Evaluate whether Phase 1.1-1.5 criteria are met."""
++
++    details: dict[str, Any] = {
++        "tests_passed": None,
++        "successful_sample_batches": 0,
++        "min_successful_batches": min_successful_batches,
++        "open_failed_batches": 0,
++        "reasons": [],
++    }
++
++    with engine.begin() as connection:
++        details["successful_sample_batches"] = int(
++            connection.execute(
++                text(
++                    """
++                    SELECT COUNT(*)
++                    FROM ingestion_batch_log
++                    WHERE source_name = 'yellow_taxi' AND state = 'succeeded'
++                    """
++                )
++            ).scalar()
++            or 0
++        )
++        details["open_failed_batches"] = int(
++            connection.execute(
++                text(
++                    """
++                    SELECT COUNT(*)
++                    FROM ingestion_batch_log
++                    WHERE state = 'failed'
++                    """
++                )
++            ).scalar()
++            or 0
++        )
++
++    if run_tests:
++        tests_passed, test_output = _run_phase1_tests()
++        details["tests_passed"] = tests_passed
++        details["test_output"] = test_output
++        if not tests_passed:
++            details["reasons"].append("step_1_1_to_1_5_tests_failed")
++
++    if details["successful_sample_batches"] < min_successful_batches:
++        details["reasons"].append("insufficient_successful_sample_batches")
++    if details["open_failed_batches"] > 0:
++        details["reasons"].append("open_failed_batches_present")
++
++    passed = len(details["reasons"]) == 0
++    return passed, details
+diff --git a/src/ingestion/load_raw_trips.py b/src/ingestion/load_raw_trips.py
+new file mode 100644
+index 0000000..1f32276
+--- /dev/null
++++ b/src/ingestion/load_raw_trips.py
+@@ -0,0 +1,416 @@
++"""Sample ingestion loader from TLC landing data into raw tables."""
++
++from __future__ import annotations
++
++import argparse
++import hashlib
++import json
++import os
++import time
++import uuid
++from datetime import UTC, datetime
++from pathlib import Path
++from typing import Any
++
++import pandas as pd
++from sqlalchemy import text
++
++from src.common.db import engine
++from src.common.schema_map import normalize_trip_dataframe
++from src.ingestion.checks import CheckResult, run_ingestion_checks
++from src.ingestion.ddl import apply_ingestion_ddl
++from src.ingestion.utils import sha256sum
++
++DEFAULT_INPUT_GLOB = "data/landing/tlc/year=*/month=*/*.parquet"
++
++
++def _batch_key_for_file(source_file: Path, checksum: str) -> str:
++    return hashlib.sha256(f"{source_file}:{checksum}".encode()).hexdigest()
++
++
++def _upsert_batch_discovered(batch_id: str, batch_key: str, source_file: Path, checksum: str) -> str:
++    with engine.begin() as connection:
++        existing = connection.execute(
++            text(
++                "SELECT state FROM ingestion_batch_log WHERE batch_key = :batch_key"
++            ),
++            {"batch_key": batch_key},
++        ).scalar()
++
++        if existing == "succeeded":
++            return "already_succeeded"
++
++        if existing is None:
++            connection.execute(
++                text(
++                    """
++                    INSERT INTO ingestion_batch_log (
++                        batch_id,
++                        batch_key,
++                        source_name,
++                        source_file,
++                        checksum,
++                        state,
++                        created_at
++                    )
++                    VALUES (
++                        :batch_id,
++                        :batch_key,
++                        :source_name,
++                        :source_file,
++                        :checksum,
++                        'discovered',
++                        :created_at
++                    )
++                    """
++                ),
++                {
++                    "batch_id": batch_id,
++                    "batch_key": batch_key,
++                    "source_name": "yellow_taxi",
++                    "source_file": str(source_file),
++                    "checksum": checksum,
++                    "created_at": datetime.now(tz=UTC),
++                },
++            )
++        else:
++            connection.execute(
++                text(
++                    """
++                    UPDATE ingestion_batch_log
++                    SET state = 'discovered',
++                        error_message = NULL,
++                        created_at = COALESCE(created_at, :created_at)
++                    WHERE batch_key = :batch_key
++                    """
++                ),
++                {"batch_key": batch_key, "created_at": datetime.now(tz=UTC)},
++            )
++    return "ready"
++
++
++def _set_batch_state(batch_key: str, state: str, **metrics: Any) -> None:
++    payload = {
++        "batch_key": batch_key,
++        "state": state,
++        "completed_at": datetime.now(tz=UTC) if state in {"failed", "succeeded"} else None,
++        "started_at": datetime.now(tz=UTC) if state == "running" else None,
++        **metrics,
++    }
++
++    assignments = ["state = :state"]
++    if payload.get("started_at"):
++        assignments.append("started_at = :started_at")
++    if payload.get("completed_at"):
++        assignments.append("completed_at = :completed_at")
++    for field in [
++        "rows_read",
++        "rows_valid",
++        "rows_rejected",
++        "load_duration_sec",
++        "check_pass_rate",
++        "error_message",
++    ]:
++        if field in payload:
++            assignments.append(f"{field} = :{field}")
++
++    sql = text(
++        f"UPDATE ingestion_batch_log SET {', '.join(assignments)} WHERE batch_key = :batch_key"
++    )
++    with engine.begin() as connection:
++        connection.execute(sql, payload)
++
++
++def _persist_check_results(batch_id: str, results: list[CheckResult]) -> None:
++    with engine.begin() as connection:
++        for result in results:
++            connection.execute(
++                text(
++                    """
++                    INSERT INTO ingestion_check_results (
++                        batch_id,
++                        check_name,
++                        passed,
++                        metric_value,
++                        threshold_value,
++                        details,
++                        created_at
++                    )
++                    VALUES (
++                        :batch_id,
++                        :check_name,
++                        :passed,
++                        :metric_value,
++                        :threshold_value,
++                        CAST(:details AS JSONB),
++                        :created_at
++                    )
++                    """
++                ),
++                {
++                    "batch_id": batch_id,
++                    "check_name": result.check_name,
++                    "passed": result.passed,
++                    "metric_value": result.metric_value,
++                    "threshold_value": result.threshold_value,
++                    "details": json.dumps(result.details),
++                    "created_at": datetime.now(tz=UTC),
++                },
++            )
++
++
++def _persist_rejects(rejects_df: pd.DataFrame) -> None:
++    if rejects_df.empty:
++        return
++
++    with engine.begin() as connection:
++        for record in rejects_df.to_dict(orient="records"):
++            connection.execute(
++                text(
++                    """
++                    INSERT INTO ingestion_rejects (
++                        ingest_batch_id,
++                        source_file,
++                        source_row_number,
++                        check_name,
++                        reason,
++                        raw_payload,
++                        created_at
++                    )
++                    VALUES (
++                        :ingest_batch_id,
++                        :source_file,
++                        :source_row_number,
++                        :check_name,
++                        :reason,
++                        CAST(:raw_payload AS JSONB),
++                        :created_at
++                    )
++                    """
++                ),
++                {
++                    **record,
++                    "created_at": datetime.now(tz=UTC),
++                },
++            )
++
++
++def _merge_staging(batch_id: str) -> int:
++    merge_sql = text(
++        """
++        INSERT INTO raw_trips (
++            vendor_id,
++            pickup_datetime,
++            dropoff_datetime,
++            pickup_location_id,
++            dropoff_location_id,
++            rate_code_id,
++            passenger_count,
++            trip_distance,
++            fare_amount,
++            total_amount,
++            payment_type,
++            store_and_fwd_flag,
++            ingest_batch_id,
++            source_file,
++            source_row_number,
++            ingested_at
++        )
++        SELECT
++            vendor_id,
++            pickup_datetime,
++            dropoff_datetime,
++            pickup_location_id,
++            dropoff_location_id,
++            rate_code_id,
++            passenger_count,
++            trip_distance,
++            fare_amount,
++            total_amount,
++            payment_type,
++            store_and_fwd_flag,
++            ingest_batch_id,
++            source_file,
++            source_row_number,
++            ingested_at
++        FROM stg_raw_trips
++        WHERE ingest_batch_id = :batch_id
++          AND source_row_number NOT IN (
++              SELECT source_row_number
++              FROM ingestion_rejects
++              WHERE ingest_batch_id = :batch_id
++          )
++        ON CONFLICT (source_file, source_row_number)
++        DO UPDATE SET
++            vendor_id = EXCLUDED.vendor_id,
++            pickup_datetime = EXCLUDED.pickup_datetime,
++            dropoff_datetime = EXCLUDED.dropoff_datetime,
++            pickup_location_id = EXCLUDED.pickup_location_id,
++            dropoff_location_id = EXCLUDED.dropoff_location_id,
++            rate_code_id = EXCLUDED.rate_code_id,
++            passenger_count = EXCLUDED.passenger_count,
++            trip_distance = EXCLUDED.trip_distance,
++            fare_amount = EXCLUDED.fare_amount,
++            total_amount = EXCLUDED.total_amount,
++            payment_type = EXCLUDED.payment_type,
++            store_and_fwd_flag = EXCLUDED.store_and_fwd_flag,
++            ingest_batch_id = EXCLUDED.ingest_batch_id,
++            ingested_at = EXCLUDED.ingested_at
++        """
++    )
++    with engine.begin() as connection:
++        result = connection.execute(merge_sql, {"batch_id": batch_id})
++    return int(result.rowcount or 0)
++
++
++def process_trip_file(
++    source_file: Path, validate_only: bool = False, max_rows_per_file: int | None = None
++) -> dict[str, Any]:
++    """Ingest a single trip file with checks and idempotent merge."""
++
++    checksum = sha256sum(source_file)
++    batch_key = _batch_key_for_file(source_file, checksum)
++    batch_id = str(uuid.uuid5(uuid.NAMESPACE_URL, batch_key))
++
++    init_state = _upsert_batch_discovered(batch_id, batch_key, source_file, checksum)
++    if init_state == "already_succeeded":
++        return {
++            "batch_id": batch_id,
++            "source_file": str(source_file),
++            "state": "succeeded",
++            "rows_read": 0,
++            "rows_valid": 0,
++            "rows_rejected": 0,
++            "inserted_or_updated": 0,
++            "message": "batch already succeeded; skipped",
++        }
++
++    start_time = time.perf_counter()
++    _set_batch_state(batch_key, "running")
++
++    try:
++        trip_df = pd.read_parquet(source_file)
++        if max_rows_per_file is not None and max_rows_per_file > 0:
++            trip_df = trip_df.head(max_rows_per_file)
++        normalized_df = normalize_trip_dataframe(trip_df, source_file, batch_id)
++
++        with engine.begin() as connection:
++            connection.execute(
++                text("DELETE FROM stg_raw_trips WHERE ingest_batch_id = :batch_id"),
++                {"batch_id": batch_id},
++            )
++        normalized_df.to_sql("stg_raw_trips", con=engine, if_exists="append", index=False, method="multi")
++
++        check_passed, check_results, rejects_df = run_ingestion_checks(normalized_df, engine)
++        _persist_check_results(batch_id, check_results)
++        _persist_rejects(rejects_df)
++
++        rows_read = len(normalized_df)
++        rows_rejected = len(rejects_df)
++        rows_valid = rows_read - rows_rejected
++        check_pass_rate = sum(1 for result in check_results if result.passed) / max(len(check_results), 1)
++
++        if not check_passed:
++            _set_batch_state(
++                batch_key,
++                "failed",
++                rows_read=rows_read,
++                rows_valid=rows_valid,
++                rows_rejected=rows_rejected,
++                load_duration_sec=time.perf_counter() - start_time,
++                check_pass_rate=check_pass_rate,
++                error_message="ingestion checks failed; merge blocked",
++            )
++            return {
++                "batch_id": batch_id,
++                "source_file": str(source_file),
++                "state": "failed",
++                "rows_read": rows_read,
++                "rows_valid": rows_valid,
++                "rows_rejected": rows_rejected,
++                "inserted_or_updated": 0,
++                "message": "validation failed",
++            }
++
++        inserted_or_updated = 0
++        if not validate_only:
++            inserted_or_updated = _merge_staging(batch_id)
++
++        _set_batch_state(
++            batch_key,
++            "succeeded",
++            rows_read=rows_read,
++            rows_valid=rows_valid,
++            rows_rejected=rows_rejected,
++            load_duration_sec=time.perf_counter() - start_time,
++            check_pass_rate=check_pass_rate,
++        )
++        return {
++            "batch_id": batch_id,
++            "source_file": str(source_file),
++            "state": "succeeded",
++            "rows_read": rows_read,
++            "rows_valid": rows_valid,
++            "rows_rejected": rows_rejected,
++            "inserted_or_updated": inserted_or_updated,
++            "message": "validated and merged" if not validate_only else "validated only",
++            "max_rows_per_file": max_rows_per_file,
++        }
++
++    except Exception as exc:
++        _set_batch_state(
++            batch_key,
++            "failed",
++            load_duration_sec=time.perf_counter() - start_time,
++            check_pass_rate=0.0,
++            error_message=str(exc),
++        )
++        raise
++
++
++def run_sample_ingestion(
++    input_glob: str, validate_only: bool = False, max_rows_per_file: int | None = None
++) -> list[dict[str, Any]]:
++    """Run ingestion for every matching sample file."""
++
++    apply_ingestion_ddl(engine)
++    source_files = sorted(Path().glob(input_glob))
++    if not source_files:
++        raise FileNotFoundError(f"No source files found for pattern: {input_glob}")
++
++    summaries = []
++    for source_file in source_files:
++        summaries.append(
++            process_trip_file(
++                source_file,
++                validate_only=validate_only,
++                max_rows_per_file=max_rows_per_file,
++            )
++        )
++    return summaries
++
++
++def parse_args() -> argparse.Namespace:
++    parser = argparse.ArgumentParser(description="Load normalized sample trips into raw tables")
++    parser.add_argument("--input-glob", default=DEFAULT_INPUT_GLOB)
++    parser.add_argument("--validate-only", action="store_true")
++    parser.add_argument(
++        "--max-rows-per-file",
++        type=int,
++        default=int(os.getenv("INGEST_SAMPLE_MAX_ROWS", "200000")),
++    )
++    return parser.parse_args()
++
++
++def main() -> None:
++    args = parse_args()
++    summaries = run_sample_ingestion(
++        args.input_glob,
++        validate_only=args.validate_only,
++        max_rows_per_file=args.max_rows_per_file,
++    )
++    print(json.dumps({"batches": summaries}, indent=2, default=str))
++
++
++if __name__ == "__main__":
++    main()
+diff --git a/src/ingestion/load_zone_dim.py b/src/ingestion/load_zone_dim.py
+new file mode 100644
+index 0000000..63518eb
+--- /dev/null
++++ b/src/ingestion/load_zone_dim.py
+@@ -0,0 +1,114 @@
++"""Load and validate taxi zone reference dimension."""
++
++from __future__ import annotations
++
++import json
++from datetime import UTC, datetime
++from pathlib import Path
++
++import pandas as pd
++from sqlalchemy import text
++
++from src.common.db import engine
++from src.ingestion.ddl import apply_ingestion_ddl
++
++ZONE_FILE = Path("data/landing/reference/taxi_zone_lookup.csv")
++
++
++def load_zone_dim(zone_file: Path = ZONE_FILE) -> dict[str, float | int]:
++    """Load dim_zone table and return persisted join coverage metrics."""
++
++    if not zone_file.exists():
++        raise FileNotFoundError(f"Zone lookup file not found: {zone_file}")
++
++    apply_ingestion_ddl(engine)
++    zone_df = pd.read_csv(zone_file)
++    zone_df = zone_df.rename(
++        columns={
++            "LocationID": "location_id",
++            "Borough": "borough",
++            "Zone": "zone",
++            "service_zone": "service_zone",
++            "Service Zone": "service_zone",
++        }
++    )
++
++    required_columns = ["location_id", "borough", "zone", "service_zone"]
++    missing_columns = [column for column in required_columns if column not in zone_df.columns]
++    if missing_columns:
++        raise RuntimeError(f"Missing required zone columns: {missing_columns}")
++
++    zone_df = zone_df[required_columns].drop_duplicates(subset=["location_id"]).copy()
++    zone_df["location_id"] = pd.to_numeric(zone_df["location_id"], errors="coerce").astype("Int64")
++    zone_df = zone_df.dropna(subset=["location_id", "borough", "zone"])
++    zone_df["ingested_at"] = datetime.now(tz=UTC)
++
++    records = zone_df.to_dict(orient="records")
++    upsert_sql = text(
++        """
++        INSERT INTO dim_zone (location_id, borough, zone, service_zone, ingested_at)
++        VALUES (:location_id, :borough, :zone, :service_zone, :ingested_at)
++        ON CONFLICT (location_id)
++        DO UPDATE SET
++            borough = EXCLUDED.borough,
++            zone = EXCLUDED.zone,
++            service_zone = EXCLUDED.service_zone,
++            ingested_at = EXCLUDED.ingested_at
++        """
++    )
++
++    with engine.begin() as connection:
++        for record in records:
++            connection.execute(upsert_sql, record)
++
++        coverage = connection.execute(
++            text(
++                """
++                WITH trip_counts AS (
++                    SELECT
++                        COUNT(*) AS total_rows,
++                        SUM(CASE WHEN p.location_id IS NOT NULL THEN 1 ELSE 0 END) AS pickup_matched,
++                        SUM(CASE WHEN d.location_id IS NOT NULL THEN 1 ELSE 0 END) AS dropoff_matched
++                    FROM raw_trips r
++                    LEFT JOIN dim_zone p ON r.pickup_location_id = p.location_id
++                    LEFT JOIN dim_zone d ON r.dropoff_location_id = d.location_id
++                )
++                SELECT
++                    total_rows,
++                    CASE WHEN total_rows = 0 THEN 0 ELSE (pickup_matched::float / total_rows) END AS pickup_coverage,
++                    CASE WHEN total_rows = 0 THEN 0 ELSE (dropoff_matched::float / total_rows) END AS dropoff_coverage
++                FROM trip_counts
++                """
++            )
++        ).mappings().one()
++
++        connection.execute(
++            text(
++                """
++                INSERT INTO zone_join_coverage_report (reported_at, total_rows, pickup_coverage_pct, dropoff_coverage_pct)
++                VALUES (:reported_at, :total_rows, :pickup_coverage, :dropoff_coverage)
++                """
++            ),
++            {
++                "reported_at": datetime.now(tz=UTC),
++                "total_rows": int(coverage["total_rows"]),
++                "pickup_coverage": float(coverage["pickup_coverage"]),
++                "dropoff_coverage": float(coverage["dropoff_coverage"]),
++            },
++        )
++
++    result = {
++        "dim_zone_rows": len(records),
++        "trip_rows": int(coverage["total_rows"]),
++        "pickup_coverage_pct": round(float(coverage["pickup_coverage"]) * 100, 2),
++        "dropoff_coverage_pct": round(float(coverage["dropoff_coverage"]) * 100, 2),
++    }
++    return result
++
++
++def main() -> None:
++    print(json.dumps(load_zone_dim(), indent=2))
++
++
++if __name__ == "__main__":
++    main()
+diff --git a/src/ingestion/utils.py b/src/ingestion/utils.py
+new file mode 100644
+index 0000000..806b17f
+--- /dev/null
++++ b/src/ingestion/utils.py
+@@ -0,0 +1,16 @@
++"""Shared ingestion utility functions."""
++
++from __future__ import annotations
++
++import hashlib
++from pathlib import Path
++
++
++def sha256sum(file_path: Path) -> str:
++    """Return SHA-256 checksum for a file."""
++
++    digest = hashlib.sha256()
++    with file_path.open("rb") as file_obj:
++        for chunk in iter(lambda: file_obj.read(1024 * 1024), b""):
++            digest.update(chunk)
++    return digest.hexdigest()
+diff --git a/src/ingestion/validate_ingestion.py b/src/ingestion/validate_ingestion.py
+new file mode 100644
+index 0000000..6afd3da
+--- /dev/null
++++ b/src/ingestion/validate_ingestion.py
+@@ -0,0 +1,21 @@
++"""Validation-only entrypoint for ingestion checks."""
++
++from __future__ import annotations
++
++import json
++import os
++
++from src.ingestion.load_raw_trips import run_sample_ingestion
++
++
++def main() -> None:
++    result = run_sample_ingestion(
++        "data/landing/tlc/year=*/month=*/*.parquet",
++        validate_only=True,
++        max_rows_per_file=int(os.getenv("INGEST_SAMPLE_MAX_ROWS", "200000")),
++    )
++    print(json.dumps({"validated_batches": result}, indent=2, default=str))
++
++
++if __name__ == "__main__":
++    main()
+diff --git a/tests/integration/test_bad_batch_block.py b/tests/integration/test_bad_batch_block.py
+new file mode 100644
+index 0000000..1853277
+--- /dev/null
++++ b/tests/integration/test_bad_batch_block.py
+@@ -0,0 +1,33 @@
++import os
++
++import pandas as pd
++import pytest
++
++from src.common.db import engine, test_connection
++from src.ingestion.checks import run_ingestion_checks
++
++if os.getenv("RUN_INGESTION_INTEGRATION") != "1":
++    pytest.skip("Set RUN_INGESTION_INTEGRATION=1 to run ingestion integration tests", allow_module_level=True)
++
++
++@pytest.mark.integration
++def test_bad_batch_fails_checks() -> None:
++    if not test_connection():
++        pytest.skip("Postgres unavailable in local test environment")
++
++    bad_df = pd.DataFrame(
++        {
++            "pickup_datetime": [pd.Timestamp("2024-01-01 11:00:00")],
++            "dropoff_datetime": [pd.Timestamp("2024-01-01 10:59:00")],
++            "pickup_location_id": [100],
++            "dropoff_location_id": [101],
++            "fare_amount": [4.0],
++            "trip_distance": [1.0],
++            "source_file": ["bad.parquet"],
++            "source_row_number": [1],
++            "ingest_batch_id": ["bad-batch"],
++        }
++    )
++
++    passed, _, _ = run_ingestion_checks(bad_df, engine)
++    assert passed is False
+diff --git a/tests/integration/test_db_connection.py b/tests/integration/test_db_connection.py
+index b71568b..f3a369d 100644
+--- a/tests/integration/test_db_connection.py
++++ b/tests/integration/test_db_connection.py
+@@ -1,7 +1,12 @@
++import os
++
+ import pytest
+ 
+ from src.common.db import test_connection as db_test_connection
+ 
++if os.getenv("RUN_INGESTION_INTEGRATION") != "1":
++    pytest.skip("Set RUN_INGESTION_INTEGRATION=1 to run ingestion integration tests", allow_module_level=True)
++
+ 
+ @pytest.mark.integration
+ def test_db_connection_optional() -> None:
+diff --git a/tests/integration/test_idempotent_rerun.py b/tests/integration/test_idempotent_rerun.py
+new file mode 100644
+index 0000000..288ba27
+--- /dev/null
++++ b/tests/integration/test_idempotent_rerun.py
+@@ -0,0 +1,21 @@
++import os
++
++import pytest
++
++from src.common.db import test_connection
++from src.ingestion.load_raw_trips import run_sample_ingestion
++
++if os.getenv("RUN_INGESTION_INTEGRATION") != "1":
++    pytest.skip("Set RUN_INGESTION_INTEGRATION=1 to run ingestion integration tests", allow_module_level=True)
++
++
++@pytest.mark.integration
++def test_idempotent_rerun_returns_no_new_updates() -> None:
++    if not test_connection():
++        pytest.skip("Postgres unavailable in local test environment")
++
++    first_run = run_sample_ingestion("data/landing/tlc/year=*/month=*/*.parquet", validate_only=False)
++    second_run = run_sample_ingestion("data/landing/tlc/year=*/month=*/*.parquet", validate_only=False)
++
++    assert len(first_run) == len(second_run)
++    assert all(summary["inserted_or_updated"] == 0 for summary in second_run)
+diff --git a/tests/integration/test_sample_ingestion.py b/tests/integration/test_sample_ingestion.py
+new file mode 100644
+index 0000000..1643775
+--- /dev/null
++++ b/tests/integration/test_sample_ingestion.py
+@@ -0,0 +1,24 @@
++import os
++from pathlib import Path
++
++import pytest
++
++from src.common.db import test_connection
++from src.ingestion.fetch import download_sample_files
++from src.ingestion.load_raw_trips import run_sample_ingestion
++
++if os.getenv("RUN_INGESTION_INTEGRATION") != "1":
++    pytest.skip("Set RUN_INGESTION_INTEGRATION=1 to run ingestion integration tests", allow_module_level=True)
++
++
++@pytest.mark.integration
++def test_sample_ingestion_runs_end_to_end() -> None:
++    if not test_connection():
++        pytest.skip("Postgres unavailable in local test environment")
++
++    download_sample_files(["2024-01", "2024-02"])
++    summaries = run_sample_ingestion("data/landing/tlc/year=*/month=*/*.parquet", validate_only=False)
++
++    assert len(summaries) >= 2
++    assert all(summary["state"] in {"succeeded", "failed"} for summary in summaries)
++    assert any(Path(summary["source_file"]).exists() for summary in summaries)
+diff --git a/tests/integration/test_zone_coverage.py b/tests/integration/test_zone_coverage.py
+new file mode 100644
+index 0000000..275d53c
+--- /dev/null
++++ b/tests/integration/test_zone_coverage.py
+@@ -0,0 +1,19 @@
++import os
++
++import pytest
++
++from src.common.db import test_connection
++from src.ingestion.load_zone_dim import load_zone_dim
++
++if os.getenv("RUN_INGESTION_INTEGRATION") != "1":
++    pytest.skip("Set RUN_INGESTION_INTEGRATION=1 to run ingestion integration tests", allow_module_level=True)
++
++
++@pytest.mark.integration
++def test_zone_coverage_report_persists() -> None:
++    if not test_connection():
++        pytest.skip("Postgres unavailable in local test environment")
++
++    result = load_zone_dim()
++    assert "pickup_coverage_pct" in result
++    assert "dropoff_coverage_pct" in result
+diff --git a/tests/unit/test_backfill_gate.py b/tests/unit/test_backfill_gate.py
+new file mode 100644
+index 0000000..d0cf1b4
+--- /dev/null
++++ b/tests/unit/test_backfill_gate.py
+@@ -0,0 +1,101 @@
++from unittest.mock import patch
++
++import pytest
++import requests
++
++from src.ingestion.backfill_historical import BackfillRunError, _resolve_periods, run_backfill
++
++
++def test_incremental_period_resolution_from_watermark() -> None:
++    with patch("src.ingestion.backfill_historical._get_watermark", return_value="2024-02"), patch(
++        "src.ingestion.backfill_historical._latest_complete_month"
++    ) as latest_month:
++        latest_month.return_value = __import__("datetime").date(2024, 4, 1)
++        periods = _resolve_periods("incremental", full_months=12, pilot_months=["2024-01"], dataset_name="yellow_taxi")
++
++    assert periods == ["2024-03", "2024-04"]
++
++
++def test_backfill_gate_fail_blocks_execution() -> None:
++    with patch("src.ingestion.backfill_historical.evaluate_phase1_gate", return_value=(False, {"reasons": ["x"]})):
++        with pytest.raises(RuntimeError, match="Phase 1 gate failed"):
++            run_backfill(
++                "pilot",
++                full_months=12,
++                max_retries=1,
++                retry_delay_seconds=0,
++                max_rows_per_file=100,
++            )
++
++
++def test_backfill_gate_pass_allows_execution_path() -> None:
++    with patch("src.ingestion.backfill_historical.evaluate_phase1_gate", return_value=(True, {})), patch(
++        "src.ingestion.backfill_historical.download_month_file"
++    ) as download_month_file, patch("src.ingestion.backfill_historical.process_trip_file") as process_trip_file, patch(
++        "src.ingestion.backfill_historical._set_watermark"
++    ) as set_watermark, patch("src.ingestion.backfill_historical._get_watermark", return_value="2024-03"):
++        download_month_file.return_value = __import__("pathlib").Path(
++            "data/landing/tlc/year=2024/month=01/yellow_tripdata_2024-01.parquet"
++        )
++        process_trip_file.return_value = {"state": "succeeded"}
++
++        result = run_backfill(
++            "pilot",
++            full_months=12,
++            max_retries=1,
++            retry_delay_seconds=0,
++            max_rows_per_file=100,
++        )
++
++    assert result["mode"] == "pilot"
++    assert set_watermark.call_count >= 1
++
++
++def test_backfill_validation_failure_raises_structured_error() -> None:
++    with patch("src.ingestion.backfill_historical.evaluate_phase1_gate", return_value=(True, {})), patch(
++        "src.ingestion.backfill_historical.download_month_file"
++    ) as download_month_file, patch("src.ingestion.backfill_historical.process_trip_file") as process_trip_file, patch(
++        "src.ingestion.backfill_historical._get_watermark", return_value="2024-01"
++    ):
++        download_month_file.return_value = __import__("pathlib").Path(
++            "data/landing/tlc/year=2024/month=02/yellow_tripdata_2024-02.parquet"
++        )
++        process_trip_file.return_value = {"state": "failed", "message": "check failure"}
++
++        with pytest.raises(BackfillRunError) as exc:
++            run_backfill(
++                "pilot",
++                full_months=12,
++                max_retries=1,
++                retry_delay_seconds=0,
++                max_rows_per_file=100,
++            )
++
++    assert exc.value.payload["status"] == "failed"
++    assert exc.value.payload["reason_code"] == "validation_failure"
++    assert exc.value.payload["failed_period"] == "2024-01"
++
++
++def test_backfill_skips_unavailable_source_month() -> None:
++    http_error = requests.HTTPError("403 forbidden")
++    response = requests.Response()
++    response.status_code = 403
++    http_error.response = response
++
++    with patch("src.ingestion.backfill_historical.evaluate_phase1_gate", return_value=(True, {})), patch(
++        "src.ingestion.backfill_historical._resolve_periods", return_value=["2025-12"]
++    ), patch("src.ingestion.backfill_historical.download_month_file", side_effect=http_error), patch(
++        "src.ingestion.backfill_historical._get_watermark", return_value="2025-11"
++    ), patch("src.ingestion.backfill_historical.process_trip_file") as process_trip_file:
++        result = run_backfill(
++            "full",
++            full_months=12,
++            max_retries=1,
++            retry_delay_seconds=0,
++            max_rows_per_file=100,
++        )
++
++    assert result["status"] == "succeeded_with_warnings"
++    assert result["unavailable_periods"] == ["2025-12"]
++    assert result["results"][0]["reason_code"] == "source_unavailable"
++    process_trip_file.assert_not_called()
+diff --git a/tests/unit/test_batch_state.py b/tests/unit/test_batch_state.py
+new file mode 100644
+index 0000000..c8093a7
+--- /dev/null
++++ b/tests/unit/test_batch_state.py
+@@ -0,0 +1,11 @@
++from src.ingestion.load_raw_trips import _batch_key_for_file
++
++
++def test_batch_key_is_deterministic() -> None:
++    source_file = "data/landing/tlc/year=2024/month=01/yellow_tripdata_2024-01.parquet"
++    checksum = "abc123"
++
++    first = _batch_key_for_file(source_file=__import__("pathlib").Path(source_file), checksum=checksum)
++    second = _batch_key_for_file(source_file=__import__("pathlib").Path(source_file), checksum=checksum)
++
++    assert first == second
+diff --git a/tests/unit/test_checks.py b/tests/unit/test_checks.py
+new file mode 100644
+index 0000000..c98ed99
+--- /dev/null
++++ b/tests/unit/test_checks.py
+@@ -0,0 +1,46 @@
++import pandas as pd
++import pytest
++
++from src.common.db import engine
++from src.common.db import test_connection as db_connection_ok
++from src.ingestion.checks import run_ingestion_checks
++
++
++def _valid_frame() -> pd.DataFrame:
++    return pd.DataFrame(
++        {
++            "pickup_datetime": [pd.Timestamp("2024-01-01 10:00:00")],
++            "dropoff_datetime": [pd.Timestamp("2024-01-01 10:15:00")],
++            "pickup_location_id": [100],
++            "dropoff_location_id": [101],
++            "fare_amount": [5.5],
++            "trip_distance": [1.2],
++            "source_file": ["sample.parquet"],
++            "source_row_number": [1],
++            "ingest_batch_id": ["batch-1"],
++        }
++    )
++
++
++def test_checks_pass_for_valid_data() -> None:
++    if not db_connection_ok():
++        pytest.skip("Postgres unavailable in local test environment")
++
++    passed, results, rejects = run_ingestion_checks(_valid_frame(), engine)
++
++    assert passed is True
++    assert len(results) > 0
++    assert rejects.empty
++
++
++def test_checks_fail_for_negative_fare() -> None:
++    if not db_connection_ok():
++        pytest.skip("Postgres unavailable in local test environment")
++
++    frame = _valid_frame()
++    frame.loc[0, "fare_amount"] = -1.0
++
++    passed, _, rejects = run_ingestion_checks(frame, engine)
++
++    assert passed is False
++    assert len(rejects) == 1
+diff --git a/tests/unit/test_checksum.py b/tests/unit/test_checksum.py
+new file mode 100644
+index 0000000..5df385c
+--- /dev/null
++++ b/tests/unit/test_checksum.py
+@@ -0,0 +1,14 @@
++from pathlib import Path
++
++from src.ingestion.utils import sha256sum
++
++
++def test_sha256sum_is_stable(tmp_path: Path) -> None:
++    file_path = tmp_path / "sample.txt"
++    file_path.write_text("phase1-checksum", encoding="utf-8")
++
++    first = sha256sum(file_path)
++    second = sha256sum(file_path)
++
++    assert first == second
++    assert len(first) == 64
+diff --git a/tests/unit/test_gate.py b/tests/unit/test_gate.py
+new file mode 100644
+index 0000000..d45ed3f
+--- /dev/null
++++ b/tests/unit/test_gate.py
+@@ -0,0 +1,24 @@
++from sqlalchemy import create_engine, text
++
++from src.ingestion.gate import evaluate_phase1_gate
++
++
++def test_gate_fails_with_insufficient_batches() -> None:
++    test_engine = create_engine("sqlite+pysqlite:///:memory:", future=True)
++    with test_engine.begin() as connection:
++        connection.execute(
++            text(
++                """
++                CREATE TABLE ingestion_batch_log (
++                    batch_id TEXT PRIMARY KEY,
++                    source_name TEXT NOT NULL,
++                    state TEXT NOT NULL
++                )
++                """
++            )
++        )
++
++    passed, details = evaluate_phase1_gate(test_engine, min_successful_batches=2, run_tests=False)
++
++    assert passed is False
++    assert "insufficient_successful_sample_batches" in details["reasons"]
+diff --git a/tests/unit/test_schema_map.py b/tests/unit/test_schema_map.py
+new file mode 100644
+index 0000000..b99628e
+--- /dev/null
++++ b/tests/unit/test_schema_map.py
+@@ -0,0 +1,25 @@
++from pathlib import Path
++
++import pandas as pd
++
++from src.common.schema_map import TRIP_COLUMNS_WITH_META, normalize_trip_dataframe
++
++
++def test_normalize_trip_dataframe_schema() -> None:
++    sample = pd.DataFrame(
++        {
++            "VendorID": [1],
++            "tpep_pickup_datetime": ["2024-01-01 00:00:00"],
++            "tpep_dropoff_datetime": ["2024-01-01 00:20:00"],
++            "PULocationID": [132],
++            "DOLocationID": [231],
++            "trip_distance": [2.1],
++            "fare_amount": [10.5],
++            "total_amount": [14.2],
++        }
++    )
++    normalized = normalize_trip_dataframe(sample, Path("sample.parquet"), "batch-1")
++
++    assert list(normalized.columns) == TRIP_COLUMNS_WITH_META
++    assert normalized.iloc[0]["pickup_location_id"] == 132
++    assert normalized.iloc[0]["source_row_number"] == 1
+diff --git a/tests/unit/test_watermark.py b/tests/unit/test_watermark.py
+new file mode 100644
+index 0000000..a4a4499
+--- /dev/null
++++ b/tests/unit/test_watermark.py
+@@ -0,0 +1,35 @@
++from datetime import UTC, datetime
++
++import pytest
++from sqlalchemy import text
++
++from src.common.db import engine
++from src.common.db import test_connection as db_connection_ok
++from src.ingestion.ddl import apply_ingestion_ddl
++
++
++def test_watermark_upsert_round_trip() -> None:
++    if not db_connection_ok():
++        pytest.skip("Postgres unavailable in local test environment")
++
++    apply_ingestion_ddl(engine)
++    with engine.begin() as connection:
++        connection.execute(
++            text(
++                """
++                INSERT INTO ingestion_watermark (dataset_name, latest_successful_period, updated_at)
++                VALUES ('yellow_taxi', '2024-01', :updated_at)
++                ON CONFLICT (dataset_name)
++                DO UPDATE SET latest_successful_period = EXCLUDED.latest_successful_period,
++                              updated_at = EXCLUDED.updated_at
++                """
++            ),
++            {"updated_at": datetime.now(tz=UTC)},
++        )
++        current = connection.execute(
++            text(
++                "SELECT latest_successful_period FROM ingestion_watermark WHERE dataset_name = 'yellow_taxi'"
++            )
++        ).scalar()
++
++    assert current == "2024-01"
+diff --git a/validation_steps.txt b/validation_steps.txt
+new file mode 100644
+index 0000000..3736686
+--- /dev/null
++++ b/validation_steps.txt
+@@ -0,0 +1,84 @@
++Phase 0 test:
++
++make setup
++make up
++make smoke
++make check
++make down
++
++Phase 1 test:
++
++# 0) Go to repo
++cd "/Users/anaghar/Documents/Portfolio Projects/Real-Time-Ride-Demand-Forecasting-and-Dynamic-Pricing-Guardrails"
++
++# 1) Start prerequisites
++open -a Docker
++until docker info >/dev/null 2>&1; do echo "Waiting for Docker..."; sleep 2; done
++python3.11 --version
++docker --version
++docker compose version
++make --version
++
++# 2) Setup + platform
++make setup
++make up
++make ps
++curl -fsS http://localhost:8000/health
++curl -fsS http://localhost:8000/ready
++
++# 3) Timing helper
++run_timed () {
++  label="$1"; shift
++  start=$(date +%s)
++  echo "=== $label : START $(date) ==="
++  "$@"
++  rc=$?
++  end=$(date +%s)
++  echo "=== $label : END $(date) | elapsed_sec=$((end-start)) | rc=$rc ==="
++  return $rc
++}
++
++# 4) Phase 1.1 -> 1.5 (required order)
++run_timed "1.1 sample download" make ingest-sample-download
++run_timed "1.3 zone dim load" make ingest-zone-dim
++run_timed "1.2 raw sample load" make ingest-load-sample
++run_timed "1.4 validation" make ingest-validate
++run_timed "1.5 run sample" make ingest-run-sample
++run_timed "1.5 rerun sample (idempotency)" make ingest-rerun-sample
++run_timed "gate check" make ingest-gate-check
++
++# 5) Verify 1.1-1.5 in DB
++set -a; source .env; set +a
++docker compose --env-file .env -f infra/docker-compose.yml exec -T postgres \
++psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "
++SELECT source_file,state,rows_read,rows_valid,rows_rejected,load_duration_sec,started_at,completed_at
++FROM ingestion_batch_log
++ORDER BY created_at DESC
++LIMIT 20;"
++
++docker compose --env-file .env -f infra/docker-compose.yml exec -T postgres \
++psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "SELECT COUNT(*) AS raw_trips_count FROM raw_trips;"
++
++docker compose --env-file .env -f infra/docker-compose.yml exec -T postgres \
++psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "SELECT COUNT(*) AS failed_batches FROM ingestion_batch_log WHERE state='failed';"
++
++# 6) Phase 1.6
++run_timed "1.6 pilot backfill" make ingest-backfill-pilot
++run_timed "1.6 full backfill" make ingest-backfill-full
++run_timed "1.6 incremental backfill" make ingest-incremental
++
++# 7) If full/incremental fails, inspect failing check(s)
++docker compose --env-file .env -f infra/docker-compose.yml exec -T postgres \
++psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "
++SELECT batch_id, source_file, state, error_message, completed_at
++FROM ingestion_batch_log
++WHERE state='failed'
++ORDER BY completed_at DESC;"
++
++docker compose --env-file .env -f infra/docker-compose.yml exec -T postgres \
++psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "
++SELECT r.batch_id, r.check_name, r.passed, r.metric_value, r.threshold_value, r.details
++FROM ingestion_check_results r
++JOIN ingestion_batch_log b ON b.batch_id = r.batch_id
++WHERE b.state='failed'
++ORDER BY r.created_at DESC, r.check_name;"

@@ -1,6 +1,11 @@
+import os
+
 import pytest
 
 from src.common.db import test_connection as db_test_connection
+
+if os.getenv("RUN_INGESTION_INTEGRATION") != "1":
+    pytest.skip("Set RUN_INGESTION_INTEGRATION=1 to run ingestion integration tests", allow_module_level=True)
 
 
 @pytest.mark.integration

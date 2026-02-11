@@ -26,3 +26,6 @@ htmlcov/
 *.log
 artifacts/
 mlruns/
+
+# Local datasets
+data/landing/
