@@ -6,6 +6,13 @@ import requests
 from src.ingestion.backfill_historical import BackfillRunError, _resolve_periods, run_backfill
 
 
+@pytest.fixture(autouse=True)
+def _mock_apply_ingestion_ddl() -> None:
+    """Keep unit tests DB-independent in CI."""
+    with patch("src.ingestion.backfill_historical.apply_ingestion_ddl"):
+        yield
+
+
 def test_incremental_period_resolution_from_watermark() -> None:
     with patch("src.ingestion.backfill_historical._get_watermark", return_value="2024-02"), patch(
         "src.ingestion.backfill_historical._latest_complete_month"
