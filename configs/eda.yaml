@@ -1,0 +1,20 @@
+analysis_window:
+  start_date: "2024-01-01"
+  end_date: "2024-01-07"
+feature_version: "v1"
+policy_version: "p1"
+zones: null
+reporting:
+  top_n_zones: 10
+  bottom_n_zones: 10
+  output_dir: "reports/eda"
+  docs_dir: "docs/eda"
+  include_heatmap: true
+checks:
+  required_report_sections:
+    - "Objective"
+    - "Data Interval"
+    - "Key Findings"
+    - "Sparse Zone Outcomes"
+    - "Fallback Recommendation"
+    - "Implications for Phase 4"

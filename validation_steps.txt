@@ -160,3 +160,82 @@ Expected: metrics unchanged across reruns for same inputs.
 RUN_FEATURE_INTEGRATION=1 .venv/bin/python -m pytest test
 
 RUN_FEATURE_INTEGRATION=1 .venv/bin/python -m pytest tests
+
+
+Phase 3 test:
+
+1. Install/update deps
+.venv/bin/pip install -r requirements.txt
+
+2. Static checks
+.venv/bin/python -m ruff check src tests
+.venv/bin/python -m mypy src
+
+3. Run Phase 3 step-by-step (required sequence)
+make eda-seasonality
+make eda-sparsity
+make eda-fallback-policy
+make eda-docs
+make eda-validate
+make eda-run
+
+4. Run Phase 3 tests
+.venv/bin/python -m pytest tests/eda/test_seasonality_metrics.py tests/eda/test_sparsity_thresholds.py tests/eda/test_fallback_assignment.py tests/eda/test_assumptions_registry.py
+RUN_EDA_INTEGRATION=1 .venv/bin/python -m pytest tests/eda/test_integration_eda_run.py
+Optional full suite
+RUN_FEATURE_INTEGRATION=1 RUN_EDA_INTEGRATION=1 .venv/bin/python -m pytest tests
+
+5. DB verification queries (run in psql)
+make db-shell
+Then execute:
+
+SELECT run_id, status, started_at, ended_at, feature_version, policy_version
+FROM eda_run_log
+ORDER BY started_at DESC
+LIMIT 5;
+
+SELECT run_id, check_name, severity, passed
+FROM eda_check_results
+ORDER BY created_at DESC
+LIMIT 50;
+
+SELECT run_id, COUNT(*) AS rows
+FROM eda_time_profile_summary
+GROUP BY run_id
+ORDER BY MAX(created_at) DESC
+LIMIT 5;
+
+SELECT run_id, COUNT(*) AS rows, COUNT(DISTINCT zone_id) AS zones
+FROM eda_zone_sparsity_summary
+GROUP BY run_id
+ORDER BY MAX(created_at) DESC
+LIMIT 5;
+
+SELECT run_id, COUNT(*) AS policy_rows, COUNT(DISTINCT zone_id) AS zones
+FROM zone_fallback_policy
+GROUP BY run_id
+ORDER BY MAX(created_at) DESC
+LIMIT 5;
+
+SELECT s.run_id,
+       COUNT(DISTINCT s.zone_id) AS sparse_zones,
+       COUNT(DISTINCT p.zone_id) AS policy_zones
+FROM eda_zone_sparsity_summary s
+LEFT JOIN zone_fallback_policy p
+  ON s.run_id = p.run_id AND s.zone_id = p.zone_id
+GROUP BY s.run_id
+ORDER BY s.run_id DESC
+LIMIT 5;
+
+6. Filesystem artifact checks
+ls -la docs/eda
+ls -la reports/eda
+LATEST_RUN=$(ls -1 reports/eda | tail -n 1); echo "$LATEST_RUN"; ls -la "reports/eda/$LATEST_RUN"
+
+7. Check per-run join consistency across all manual step-by-step execution:
+export EDA_RUN_ID=$(python -c "import uuid; print(uuid.uuid4())")
+make eda-seasonality
+make eda-sparsity
+make eda-fallback-policy
+make eda-docs
+make eda-validate

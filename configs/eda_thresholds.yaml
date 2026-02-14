@@ -1,0 +1,35 @@
+sparsity_thresholds:
+  robust:
+    min_nonzero_ratio: 0.60
+    min_active_days: 5
+    min_coverage_ratio: 0.95
+  medium:
+    min_nonzero_ratio: 0.30
+    min_active_days: 3
+    min_coverage_ratio: 0.90
+  sparse:
+    min_nonzero_ratio: 0.10
+    min_active_days: 1
+    min_coverage_ratio: 0.80
+  ultra_sparse:
+    min_nonzero_ratio: 0.0
+    min_active_days: 0
+    min_coverage_ratio: 0.0
+
+fallback_policy_mapping:
+  robust:
+    fallback_method: "zone_model"
+    fallback_priority: 1
+    confidence_band: "tight"
+  medium:
+    fallback_method: "zone_model_conservative_smoothing"
+    fallback_priority: 2
+    confidence_band: "medium"
+  sparse:
+    fallback_method: "borough_seasonal_baseline"
+    fallback_priority: 3
+    confidence_band: "wide"
+  ultra_sparse:
+    fallback_method: "city_seasonal_baseline"
+    fallback_priority: 4
+    confidence_band: "widest"

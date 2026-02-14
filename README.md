@@ -47,6 +47,22 @@ Production-style local-first ML/MLOps platform for NYC TLC ride-demand forecasti
 - Rolling stats: `roll_mean_4`, `roll_mean_8`, `roll_std_8`, `roll_max_16`
 - Metadata: `feature_version`, `created_at`, `run_id`, `source_min_ts`, `source_max_ts`
 
+## Phase 3 EDA and governance scope
+- Objective: reproducible time-series EDA to guide sparse-segment modeling and fallback-safe scoring behavior.
+- Inputs: `fact_demand_features` at `zone_id x 15-minute bucket_start_ts`.
+- Core outputs:
+  - `eda_time_profile_summary`
+  - `eda_zone_profile_summary`
+  - `eda_seasonality_summary`
+  - `eda_zone_sparsity_summary`
+  - `zone_fallback_policy`
+  - `eda_run_log`, `eda_check_results`
+- Governance docs:
+  - `docs/eda/phase3_report.md`
+  - `docs/eda/assumptions_register.yaml`
+  - `docs/eda/fallback_policy.md`
+  - `docs/eda/data_dictionary_addendum.md`
+
 ## Strict gate policy for Step 1.6
 Backfill commands always enforce `scripts/check_phase1_gate.py` first. Step 1.6 aborts if:
 - Step 1.1-1.5 tests are not passing
@@ -104,6 +120,29 @@ make smoke
 6. `make features-publish`
 7. `make features-build`
 
+## Phase 3 commands (required order)
+1. `make eda-seasonality`
+2. `make eda-sparsity`
+3. `make eda-fallback-policy`
+4. `make eda-docs`
+5. `make eda-validate`
+6. `make eda-run`
+
+Phase 3 configuration:
+- `configs/eda.yaml`: analysis window, top/bottom zone settings, report output paths.
+- `configs/eda_thresholds.yaml`: sparsity thresholds and fallback policy mapping.
+- Optional Make overrides:
+  - `EDA_START_DATE`, `EDA_END_DATE`
+  - `EDA_FEATURE_VERSION`, `EDA_POLICY_VERSION`
+  - `EDA_ZONES`
+  - `EDA_RUN_ID`
+
+Sparsity classes:
+- `robust`: high non-zero activity and coverage, zone model preferred.
+- `medium`: moderate activity, zone model with conservative smoothing.
+- `sparse`: limited activity, borough seasonal baseline fallback.
+- `ultra_sparse`: minimal activity, city seasonal baseline fallback.
+
 Use `.env` or Make overrides for runtime scope:
 - `FEATURE_START_DATE` (inclusive)
 - `FEATURE_END_DATE` (inclusive)
@@ -140,3 +179,9 @@ Use `.env` or Make overrides for runtime scope:
   - Inspect `feature_check_results` by `run_id` and resolve `severity='critical'` failures before publish.
 - Feature rerun determinism:
   - Re-run the same date interval + `FEATURE_VERSION` and compare row count and aggregate metrics in `fact_demand_features`.
+- EDA run failure:
+  - Query `eda_check_results` for failed critical checks by `run_id`.
+- Missing fallback assignments:
+  - Re-run `make eda-sparsity` then `make eda-fallback-policy`; verify `zone_fallback_policy` coverage equals sparsity zone count.
+- Report section check failures:
+  - Regenerate docs with `make eda-docs` and verify required sections in `docs/eda/phase3_report.md`.

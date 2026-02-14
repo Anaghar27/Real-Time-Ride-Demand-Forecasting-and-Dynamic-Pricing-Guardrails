@@ -11,12 +11,18 @@ VENV_PYTHON := .venv/bin/python
 VENV_PIP := .venv/bin/pip
 VENV_UVICORN := .venv/bin/uvicorn
 
-.PHONY: help setup up down restart logs ps api test lint format typecheck check clean db-shell smoke mlflow-ui urls ingest-sample-download ingest-zone-dim ingest-load-sample ingest-validate ingest-run-sample ingest-rerun-sample ingest-gate-check ingest-backfill-pilot ingest-backfill-full ingest-incremental features-time-buckets features-aggregate features-calendar features-lag-roll features-validate features-publish features-build
+.PHONY: help setup up down restart logs ps api test lint format typecheck check clean db-shell smoke mlflow-ui urls ingest-sample-download ingest-zone-dim ingest-load-sample ingest-validate ingest-run-sample ingest-rerun-sample ingest-gate-check ingest-backfill-pilot ingest-backfill-full ingest-incremental features-time-buckets features-aggregate features-calendar features-lag-roll features-validate features-publish features-build eda-seasonality eda-sparsity eda-fallback-policy eda-docs eda-validate eda-run
 
 FEATURE_START_DATE ?= 2024-01-01
 FEATURE_END_DATE ?= 2024-01-07
 FEATURE_VERSION ?= v1
 FEATURE_ZONES ?=
+EDA_START_DATE ?= 2024-01-01
+EDA_END_DATE ?= 2024-01-07
+EDA_FEATURE_VERSION ?= v1
+EDA_POLICY_VERSION ?= p1
+EDA_ZONES ?=
+EDA_RUN_ID ?=
 
 help: ## Show available commands
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "%-12s %s\n", $$1, $$2}'
@@ -159,3 +165,23 @@ features-publish: ## Step 2.5 publish fact_demand_features
 
 features-build: ## Full chain: 2.1 to 2.5 (build, validate, publish)
 	@$(VENV_PYTHON) -m src.features.build_feature_pipeline --start-date $(FEATURE_START_DATE) --end-date $(FEATURE_END_DATE) --feature-version $(FEATURE_VERSION) --zones "$(FEATURE_ZONES)"
+
+eda-seasonality: ## Step 3.1 profile seasonal patterns and zone behavior
+	@RUN_ID=$${EDA_RUN_ID:-$$($(VENV_PYTHON) -c "import uuid; print(uuid.uuid4())")}; \
+	$(VENV_PYTHON) -m src.eda.profile_seasonality --start-date $(EDA_START_DATE) --end-date $(EDA_END_DATE) --feature-version $(EDA_FEATURE_VERSION) --policy-version $(EDA_POLICY_VERSION) --zones "$(EDA_ZONES)" --run-id $$RUN_ID
+
+eda-sparsity: ## Step 3.2 classify sparse zones with config-driven thresholds
+	@RUN_ID=$${EDA_RUN_ID:-$$($(VENV_PYTHON) -c "import uuid; print(uuid.uuid4())")}; \
+	$(VENV_PYTHON) -m src.eda.zone_sparsity --start-date $(EDA_START_DATE) --end-date $(EDA_END_DATE) --feature-version $(EDA_FEATURE_VERSION) --policy-version $(EDA_POLICY_VERSION) --zones "$(EDA_ZONES)" --run-id $$RUN_ID
+
+eda-fallback-policy: ## Step 3.2 assign fallback policy by sparsity class
+	@$(VENV_PYTHON) -m src.eda.fallback_policy --start-date $(EDA_START_DATE) --end-date $(EDA_END_DATE) --feature-version $(EDA_FEATURE_VERSION) --policy-version $(EDA_POLICY_VERSION) --zones "$(EDA_ZONES)" --run-id "$(EDA_RUN_ID)"
+
+eda-docs: ## Step 3.3 generate assumptions register and governance docs
+	@$(VENV_PYTHON) -m src.eda.assumptions_registry --start-date $(EDA_START_DATE) --end-date $(EDA_END_DATE) --feature-version $(EDA_FEATURE_VERSION) --policy-version $(EDA_POLICY_VERSION) --zones "$(EDA_ZONES)" --run-id "$(EDA_RUN_ID)"
+
+eda-validate: ## Validate full EDA flow and critical checks
+	@$(VENV_PYTHON) -m src.eda.eda_orchestrator --start-date $(EDA_START_DATE) --end-date $(EDA_END_DATE) --feature-version $(EDA_FEATURE_VERSION) --policy-version $(EDA_POLICY_VERSION) --zones "$(EDA_ZONES)"
+
+eda-run: ## Full Phase 3 orchestration with persisted outputs and docs
+	@$(VENV_PYTHON) -m src.eda.eda_orchestrator --start-date $(EDA_START_DATE) --end-date $(EDA_END_DATE) --feature-version $(EDA_FEATURE_VERSION) --policy-version $(EDA_POLICY_VERSION) --zones "$(EDA_ZONES)" --run-id "$(EDA_RUN_ID)"

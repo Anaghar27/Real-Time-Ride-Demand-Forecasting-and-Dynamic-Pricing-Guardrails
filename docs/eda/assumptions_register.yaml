@@ -1,0 +1,44 @@
+run_id: 79f24492-397c-41b7-9fce-0fc333afe08e
+version: 1
+data_assumptions:
+  timezone: UTC TIMESTAMPTZ storage; configurable local derivation via FEATURE_TIMEZONE
+  bucket_definition: 15-minute buckets, left-closed right-open [bucket_start_ts, bucket_start_ts+15m)
+  missing_bucket_handling: zero-filled from zone-time spine
+  zero_demand_interpretation: no observed pickups in bucket, not missing data
+  outlier_treatment: descriptive only in Phase 3; no row removal
+feature_assumptions:
+  availability: calendar, lag, and rolling features from fact_demand_features only
+  leakage_boundaries: lags/rolling based on prior rows only
+  null_policy: configured in Phase 2 FEATURE_LAG_NULL_POLICY
+eda_assumptions:
+  data_window:
+    start: '2024-01-02T00:00:00+00:00'
+    end: '2024-01-03T00:00:00+00:00'
+    feature_version: v1
+    source_rows: 263
+  sparsity_thresholds:
+    robust:
+      min_nonzero_ratio: 0.6
+      min_active_days: 5
+      min_coverage_ratio: 0.95
+    medium:
+      min_nonzero_ratio: 0.3
+      min_active_days: 3
+      min_coverage_ratio: 0.9
+    sparse:
+      min_nonzero_ratio: 0.1
+      min_active_days: 1
+      min_coverage_ratio: 0.8
+    ultra_sparse:
+      min_nonzero_ratio: 0.0
+      min_active_days: 0
+      min_coverage_ratio: 0.0
+  holiday_source: data/reference/holidays_us_nyc.csv
+model_handoff_assumptions:
+  fallback_policy_usage: policy chosen by zone sparsity class and policy_version
+  excluded_zone_rules: none by default
+  recommended_evaluation_slices:
+  - top volume zones
+  - ultra_sparse zones
+  - weekend peaks
+  - holiday buckets
