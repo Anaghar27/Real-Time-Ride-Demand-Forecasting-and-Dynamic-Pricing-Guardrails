@@ -1,3 +1,9 @@
+"""
+Unit tests for gate.
+It asserts expected behavior and guards against regressions in the corresponding component.
+These tests are executed by `pytest` locally and in CI and should remain deterministic.
+"""
+
 from sqlalchemy import create_engine, text
 
 from src.ingestion.gate import evaluate_phase1_gate

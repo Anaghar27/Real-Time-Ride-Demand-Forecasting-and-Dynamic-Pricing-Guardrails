@@ -1,4 +1,8 @@
-"""Register champion model in MLflow Model Registry with audit trail."""
+"""
+Register champion model in MLflow Model Registry with audit trail.
+It helps build time-based splits, train/evaluate models, and apply the champion selection policy.
+Runs log to MLflow and write artifacts under `reports/training/<run_id>/` for traceability.
+"""
 
 from __future__ import annotations
 

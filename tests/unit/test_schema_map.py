@@ -1,3 +1,9 @@
+"""
+Unit tests for schema map.
+It asserts expected behavior and guards against regressions in the corresponding component.
+These tests are executed by `pytest` locally and in CI and should remain deterministic.
+"""
+
 from pathlib import Path
 
 import pandas as pd

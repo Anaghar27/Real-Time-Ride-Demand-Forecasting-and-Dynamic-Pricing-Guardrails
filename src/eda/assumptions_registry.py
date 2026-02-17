@@ -1,4 +1,8 @@
-"""Phase 3.3 governance assumptions and documentation registry."""
+"""
+Phase 3.3 governance assumptions and documentation registry.
+It reads from the feature tables and produces reproducible summaries and governance artifacts.
+Run it via `make eda-*` targets or through the EDA orchestrator for a full end-to-end report.
+"""
 
 from __future__ import annotations
 

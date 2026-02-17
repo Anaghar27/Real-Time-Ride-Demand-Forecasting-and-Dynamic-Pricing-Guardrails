@@ -1,3 +1,9 @@
+"""
+Tests for sparsity thresholds.
+It asserts expected behavior and guards against regressions in the corresponding component.
+These tests are executed by `pytest` locally and in CI and should remain deterministic.
+"""
+
 from __future__ import annotations
 
 from src.eda.zone_sparsity import classify_sparsity, max_consecutive_zeros

@@ -1,3 +1,9 @@
+"""
+Unit tests for calendar feature derivation.
+It asserts expected behavior and guards against regressions in the corresponding component.
+These tests are executed by `pytest` locally and in CI and should remain deterministic.
+"""
+
 from __future__ import annotations
 
 from datetime import UTC, datetime

@@ -1,3 +1,9 @@
+"""
+Unit tests for batch state.
+It asserts expected behavior and guards against regressions in the corresponding component.
+These tests are executed by `pytest` locally and in CI and should remain deterministic.
+"""
+
 from src.ingestion.load_raw_trips import _batch_key_for_file
 
 

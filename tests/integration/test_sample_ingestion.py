@@ -1,3 +1,9 @@
+"""
+Integration tests for sample ingestion.
+It asserts expected behavior and guards against regressions in the corresponding component.
+These tests are executed by `pytest` locally and in CI and should remain deterministic.
+"""
+
 import os
 from pathlib import Path
 

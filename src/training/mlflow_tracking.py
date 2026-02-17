@@ -1,4 +1,8 @@
-"""MLflow logging utilities for Phase 4 training."""
+"""
+MLflow logging utilities for Phase 4 training.
+It helps build time-based splits, train/evaluate models, and apply the champion selection policy.
+Runs log to MLflow and write artifacts under `reports/training/<run_id>/` for traceability.
+"""
 
 from __future__ import annotations
 

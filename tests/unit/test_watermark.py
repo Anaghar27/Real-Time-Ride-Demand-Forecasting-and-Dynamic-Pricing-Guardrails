@@ -1,3 +1,9 @@
+"""
+Unit tests for watermark.
+It asserts expected behavior and guards against regressions in the corresponding component.
+These tests are executed by `pytest` locally and in CI and should remain deterministic.
+"""
+
 from datetime import UTC, datetime
 
 import pytest

@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Download sample TLC files and taxi zone lookup into landing paths."""
+"""
+Download sample TLC files and taxi zone lookup into landing paths.
+It packages a repeatable workflow so development tasks can be executed consistently.
+Run it directly or via `make`, and expect it to print progress and exit non-zero on failure.
+"""
 
 from __future__ import annotations
 

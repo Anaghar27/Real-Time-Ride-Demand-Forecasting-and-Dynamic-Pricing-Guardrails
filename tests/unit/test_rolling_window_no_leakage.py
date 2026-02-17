@@ -1,3 +1,9 @@
+"""
+Unit tests for rolling window no leakage.
+It asserts expected behavior and guards against regressions in the corresponding component.
+These tests are executed by `pytest` locally and in CI and should remain deterministic.
+"""
+
 from __future__ import annotations
 
 import pandas as pd

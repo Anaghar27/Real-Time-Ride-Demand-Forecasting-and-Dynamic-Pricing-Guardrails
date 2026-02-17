@@ -1,4 +1,8 @@
-"""Phase 3.2 fallback policy assignment from sparsity classes."""
+"""
+Phase 3.2 fallback policy assignment from sparsity classes.
+It reads from the feature tables and produces reproducible summaries and governance artifacts.
+Run it via `make eda-*` targets or through the EDA orchestrator for a full end-to-end report.
+"""
 
 from __future__ import annotations
 

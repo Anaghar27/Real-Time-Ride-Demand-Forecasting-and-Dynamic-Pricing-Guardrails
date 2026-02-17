@@ -1,4 +1,8 @@
-"""Step 2.1 Build 15-minute time buckets and zone-time spine."""
+"""
+Step 2.1 Build 15-minute time buckets and zone-time spine.
+It contributes to a leakage-safe, 15-minute demand feature set materialized in Postgres.
+Run it via the Phase 2 Make targets or through `src.features.build_feature_pipeline`.
+"""
 
 from __future__ import annotations
 

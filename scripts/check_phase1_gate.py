@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Enforce Phase 1 gate before historical backfill."""
+"""
+Enforce Phase 1 gate before historical backfill.
+It packages a repeatable workflow so development tasks can be executed consistently.
+Run it directly or via `make`, and expect it to print progress and exit non-zero on failure.
+"""
 
 from __future__ import annotations
 

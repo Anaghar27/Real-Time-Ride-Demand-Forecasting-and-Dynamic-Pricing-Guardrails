@@ -1,4 +1,8 @@
-"""Schema normalization for NYC TLC trip datasets."""
+"""
+Schema normalization for NYC TLC trip datasets.
+It centralizes cross-cutting concerns like settings, logging, and database access used by the pipelines.
+Keeping these helpers isolated reduces duplication and keeps domain modules focused on business logic.
+"""
 
 from __future__ import annotations
 

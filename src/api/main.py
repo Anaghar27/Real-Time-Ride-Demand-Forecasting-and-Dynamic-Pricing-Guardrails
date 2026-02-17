@@ -1,4 +1,8 @@
-"""FastAPI application entrypoint."""
+"""
+FastAPI application entrypoint.
+It wires configuration and routes so the local platform can serve health checks and runtime APIs.
+The service is started via Uvicorn directly or through Docker Compose during local development.
+"""
 
 from __future__ import annotations
 

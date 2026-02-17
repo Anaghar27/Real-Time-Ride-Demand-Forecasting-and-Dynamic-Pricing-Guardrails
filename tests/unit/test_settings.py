@@ -1,3 +1,9 @@
+"""
+Unit tests for settings.
+It asserts expected behavior and guards against regressions in the corresponding component.
+These tests are executed by `pytest` locally and in CI and should remain deterministic.
+"""
+
 import pytest
 
 from src.common import settings as settings_module

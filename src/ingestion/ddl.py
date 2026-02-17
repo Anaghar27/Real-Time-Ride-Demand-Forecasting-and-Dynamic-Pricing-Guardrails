@@ -1,4 +1,8 @@
-"""DDL helpers for ingestion tables."""
+"""
+DDL helpers for ingestion tables.
+It supports an idempotent ingestion workflow that loads raw TLC data and reference tables into Postgres.
+It is typically invoked via the Phase 1 Make targets and should be safe to re-run.
+"""
 
 from __future__ import annotations
 
