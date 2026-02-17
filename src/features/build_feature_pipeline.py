@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import argparse
 import json
+from collections.abc import Callable
 from datetime import UTC, datetime
+from time import perf_counter
+from typing import TypeVar
 
 from sqlalchemy import text
 
@@ -18,6 +21,8 @@ from src.features.quality_checks import FeatureQualityError, run_feature_quality
 from src.features.runtime import build_feature_params, get_source_bounds
 from src.features.time_buckets import build_time_buckets
 from src.ingestion.ddl import apply_ingestion_ddl
+
+TStep = TypeVar("TStep")
 
 
 def _upsert_run_log(
@@ -135,15 +140,48 @@ def build_feature_pipeline(
 
     try:
         step_results: dict[str, object] = {}
-        step_results["time_buckets"] = build_time_buckets(params)
-        step_results["aggregate_pickups"] = aggregate_pickups(params)
-        step_results["calendar_features"] = add_calendar_features(params)
-        step_results["lag_rolling_features"] = add_lag_rolling_features(params)
-        step_results["quality_checks"] = run_feature_quality_checks(params)
+        step_timings: list[dict[str, object]] = []
+        pipeline_started_at = perf_counter()
+        print(
+            f"[features-build] run_id={params.run_id} feature_version={params.feature_version} "
+            f"window={params.run_start_ts.isoformat()}..{params.run_end_ts.isoformat()}",
+            flush=True,
+        )
+
+        def _run_step(step_name: str, fn: Callable[[], TStep]) -> TStep:
+            print(f"[features-build] start step={step_name}", flush=True)
+            step_started_at = perf_counter()
+            result = fn()
+            duration_seconds = perf_counter() - step_started_at
+            print(
+                f"[features-build] done step={step_name} duration_seconds={duration_seconds:.3f}",
+                flush=True,
+            )
+            step_timings.append(
+                {
+                    "step": step_name,
+                    "duration_seconds": round(duration_seconds, 3),
+                }
+            )
+            return result
+
+        step_results["time_buckets"] = _run_step("time_buckets", lambda: build_time_buckets(params))
+        step_results["aggregate_pickups"] = _run_step("aggregate_pickups", lambda: aggregate_pickups(params))
+        step_results["calendar_features"] = _run_step("calendar_features", lambda: add_calendar_features(params))
+        step_results["lag_rolling_features"] = _run_step(
+            "lag_rolling_features", lambda: add_lag_rolling_features(params)
+        )
+        step_results["quality_checks"] = _run_step("quality_checks", lambda: run_feature_quality_checks(params))
 
         publish_result: dict[str, int | str] | None = None
         if not dry_run:
-            publish_result = publish_features(params)
+            publish_result = _run_step("publish_features", lambda: publish_features(params))
+
+        total_duration_seconds = perf_counter() - pipeline_started_at
+        print(
+            f"[features-build] completed total_duration_seconds={total_duration_seconds:.3f}",
+            flush=True,
+        )
 
         source_min_ts, source_max_ts = get_source_bounds(engine, params)
         row_count = int(publish_result["row_count"]) if publish_result else 0
@@ -167,6 +205,8 @@ def build_feature_pipeline(
             "feature_version": params.feature_version,
             "dry_run": dry_run,
             "steps": step_results,
+            "step_timings": step_timings,
+            "total_duration_seconds": round(total_duration_seconds, 3),
             "publish": publish_result,
         }
 

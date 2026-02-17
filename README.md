@@ -63,6 +63,32 @@ Production-style local-first ML/MLOps platform for NYC TLC ride-demand forecasti
   - `docs/eda/fallback_policy.md`
   - `docs/eda/data_dictionary_addendum.md`
 
+## Phase 4 training scope
+- Objective: leakage-safe, reproducible model training and champion registration with MLflow traceability.
+- Inputs: `fact_demand_features` joined with `zone_fallback_policy` by configured `policy_version`.
+- Split policy: strict chronological holdout (`train`, `validation`, `test`) with optional rolling-origin folds (explicit timestamps or auto-derived windows in `configs/split_policy.yaml`).
+- Baselines (must run first):
+  - `naive_previous_day` using `lag_96`
+  - `naive_previous_week` using `lag_672`
+  - `linear_baseline` (ridge)
+- Candidate models:
+  - LightGBM
+  - CatBoost
+  - XGBoost
+  - ElasticNet challenger
+- Metrics:
+  - MAE, RMSE, WAPE, sMAPE
+  - required slices: peak/off-peak, weekday/weekend, robust/sparse zones
+- Tracking: all runs log params, metrics, tags, and artifacts to MLflow.
+- Champion gate:
+  - minimum improvement over best baseline on primary metric
+  - no critical sparse-zone regression
+  - latency and stability thresholds
+  - complete MLflow metadata
+- Registration:
+  - Staging by default
+  - Production only when champion policy explicitly allows it
+
 ## Strict gate policy for Step 1.6
 Backfill commands always enforce `scripts/check_phase1_gate.py` first. Step 1.6 aborts if:
 - Step 1.1-1.5 tests are not passing
@@ -128,6 +154,23 @@ make smoke
 5. `make eda-validate`
 6. `make eda-run`
 
+## Phase 4 commands (required order)
+1. `make train-prepare-data`
+2. `make train-show-splits`
+3. `make train-baseline`
+4. `make train-candidates`
+5. `make train-compare`
+6. `make train-track`
+7. `make train-select-champion`
+8. `make train-register-staging`
+9. `make train-register-production` (only when policy allows)
+10. `make train-run-all`
+11. `make train-auto` (build features + preflight coverage checks + train-run-all)
+
+Phase 4 configuration:
+- `configs/training.yaml`: feature/training window (fixed `start_date`/`end_date` or auto-derived via `data.auto_window`).
+- `configs/split_policy.yaml`: holdout/rolling split policy (explicit timestamps or auto-derived windows).
+
 Phase 3 configuration:
 - `configs/eda.yaml`: analysis window, top/bottom zone settings, report output paths.
 - `configs/eda_thresholds.yaml`: sparsity thresholds and fallback policy mapping.
@@ -185,3 +228,9 @@ Use `.env` or Make overrides for runtime scope:
   - Re-run `make eda-sparsity` then `make eda-fallback-policy`; verify `zone_fallback_policy` coverage equals sparsity zone count.
 - Report section check failures:
   - Regenerate docs with `make eda-docs` and verify required sections in `docs/eda/phase3_report.md`.
+- Training split issues:
+  - Run `make train-show-splits` and confirm strict temporal ordering with no overlaps.
+- Training gate failures:
+  - Check `reports/training/<run_id>/champion_decision.json` for reason codes.
+- Registration blocked:
+  - Verify champion gate pass and `configs/champion_policy.yaml` `registration.allow_production`.

@@ -91,7 +91,9 @@ def build_feature_params(
         feature_version=feature_version,
         run_start_ts=window.run_start_ts,
         run_end_ts=window.run_end_ts,
-        history_start_ts=window.run_start_ts - timedelta(days=8),
+        # Max lag is 672 (7 days at 15m grain) and longest rolling frame is 16 buckets (4 hours).
+        # Keep minimal required history to reduce lag/rolling scan cost.
+        history_start_ts=window.run_start_ts - timedelta(days=7, hours=4),
         feature_tz=window.feature_tz,
         lag_null_policy=lag_null_policy,
         zone_ids=zones,

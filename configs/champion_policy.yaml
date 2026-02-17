@@ -1,0 +1,10 @@
+gate:
+  primary_metric: "wape"
+  min_improvement_over_baseline_pct: 0.02
+  max_sparse_wape_regression_pct: 0.03
+  max_stability_std_wape: 2000
+  max_latency_ms_per_row: 5.0
+
+registration:
+  allow_production: false
+  default_stage: "Staging"

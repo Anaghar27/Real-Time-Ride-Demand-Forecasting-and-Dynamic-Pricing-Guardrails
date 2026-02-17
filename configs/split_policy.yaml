@@ -1,0 +1,29 @@
+policy_version: sp1
+
+# Auto-split (recommended): derive train/val/test windows from the latest timestamp
+# available in the extracted training frame. This keeps splits up-to-date as new
+# features are published.
+auto_chronological_holdout:
+  enabled: true
+  train_duration: "1D"
+  val_duration: "12H"
+  test_duration: "12H"
+  min_train_duration: "12H"
+  gap_minutes: 15
+
+chronological_holdout:
+  train_start: '2024-01-02T00:00:00+00:00'
+  train_end:   '2024-01-03T00:00:00+00:00'
+  val_start:   '2024-01-03T00:00:00+00:00'
+  val_end:     '2024-01-03T12:00:00+00:00'
+  test_start:  '2024-01-03T12:00:00+00:00'
+  test_end:    '2024-01-04T00:00:00+00:00'
+  gap_minutes: 15
+rolling_origin:
+  enabled: true
+  fold_count: 2
+  train_days: 2
+  val_days: 1
+  test_days: 1
+  stride_days: 1
+  gap_minutes: 15

@@ -1,0 +1,33 @@
+data:
+  auto_window:
+    enabled: true
+    source: raw_trips
+    lookback_days: 30
+    end_offset_days: 0
+  start_date: '2024-01-01'
+  end_date: '2024-01-03'
+  feature_version: v1
+  policy_version: p1
+  zones: ''
+  feature_timezone: UTC
+runtime:
+  random_seed: 42
+  quick_mode: true
+  reports_dir: reports/training
+tracking:
+  experiment_name: ride-demand-training
+models:
+  linear_baseline_alpha: 1.0
+registry:
+  model_name: ride-demand-forecast-model
+evaluation:
+  primary_metric: wape
+  slice_definitions:
+  - peak_hours
+  - off_peak_hours
+  - weekday
+  - weekend
+  - robust_zones
+  - sparse_zones
+automation:
+  min_nonzero_ratio_per_holdout_split: 0.01

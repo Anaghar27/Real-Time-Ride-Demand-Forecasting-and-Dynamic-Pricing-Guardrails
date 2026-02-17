@@ -26,6 +26,10 @@ htmlcov/
 *.log
 artifacts/
 mlruns/
+catboost_info/
 
 # Local datasets
 data/landing/
+
+# Generated reports
+reports/training/

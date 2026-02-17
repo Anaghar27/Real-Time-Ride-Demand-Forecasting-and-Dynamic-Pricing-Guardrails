@@ -11,7 +11,7 @@ VENV_PYTHON := .venv/bin/python
 VENV_PIP := .venv/bin/pip
 VENV_UVICORN := .venv/bin/uvicorn
 
-.PHONY: help setup up down restart logs ps api test lint format typecheck check clean db-shell smoke mlflow-ui urls ingest-sample-download ingest-zone-dim ingest-load-sample ingest-validate ingest-run-sample ingest-rerun-sample ingest-gate-check ingest-backfill-pilot ingest-backfill-full ingest-incremental features-time-buckets features-aggregate features-calendar features-lag-roll features-validate features-publish features-build eda-seasonality eda-sparsity eda-fallback-policy eda-docs eda-validate eda-run
+.PHONY: help setup up down restart logs ps api test lint format typecheck check clean db-shell smoke mlflow-ui urls ingest-sample-download ingest-zone-dim ingest-load-sample ingest-validate ingest-run-sample ingest-rerun-sample ingest-gate-check ingest-backfill-pilot ingest-backfill-full ingest-incremental features-time-buckets features-aggregate features-calendar features-lag-roll features-validate features-publish features-build eda-seasonality eda-sparsity eda-fallback-policy eda-docs eda-validate eda-run train-prepare-data train-show-splits train-baseline train-candidates train-compare train-track train-select-champion train-register train-register-staging train-register-production train-run-all train-auto
 
 FEATURE_START_DATE ?= 2024-01-01
 FEATURE_END_DATE ?= 2024-01-07
@@ -185,3 +185,51 @@ eda-validate: ## Validate full EDA flow and critical checks
 
 eda-run: ## Full Phase 3 orchestration with persisted outputs and docs
 	@$(VENV_PYTHON) -m src.eda.eda_orchestrator --start-date $(EDA_START_DATE) --end-date $(EDA_END_DATE) --feature-version $(EDA_FEATURE_VERSION) --policy-version $(EDA_POLICY_VERSION) --zones "$(EDA_ZONES)" --run-id "$(EDA_RUN_ID)"
+
+train-prepare-data: ## Phase 4 prepare training dataset and split manifest
+	@RUN_ID=$${RUN_ID:-$$($(VENV_PYTHON) -c "import uuid; print(uuid.uuid4())")}; \
+	$(VENV_PYTHON) -m src.training.training_orchestrator --step prepare-data --run-id $$RUN_ID
+
+train-show-splits: ## Phase 4 print deterministic split manifest
+	@RUN_ID=$${RUN_ID:-$$($(VENV_PYTHON) -c "import uuid; print(uuid.uuid4())")}; \
+	$(VENV_PYTHON) -m src.training.training_orchestrator --step show-splits --run-id $$RUN_ID
+
+train-baseline: ## Phase 4 run baseline models
+	@RUN_ID=$${RUN_ID:-$$($(VENV_PYTHON) -c "import uuid; print(uuid.uuid4())")}; \
+	$(VENV_PYTHON) -m src.training.training_orchestrator --step baseline --run-id $$RUN_ID
+
+train-candidates: ## Phase 4 train and tune candidate models
+	@RUN_ID=$${RUN_ID:-$$($(VENV_PYTHON) -c "import uuid; print(uuid.uuid4())")}; \
+	$(VENV_PYTHON) -m src.training.training_orchestrator --step candidates --run-id $$RUN_ID
+
+train-compare: ## Phase 4 compare baseline and candidate leaderboard
+	@RUN_ID=$${RUN_ID:-$$($(VENV_PYTHON) -c "import uuid; print(uuid.uuid4())")}; \
+	$(VENV_PYTHON) -m src.training.training_orchestrator --step compare --run-id $$RUN_ID
+
+train-track: ## Phase 4 list tracked artifacts for run
+	@RUN_ID=$${RUN_ID:-$$($(VENV_PYTHON) -c "import uuid; print(uuid.uuid4())")}; \
+	$(VENV_PYTHON) -m src.training.training_orchestrator --step track --run-id $$RUN_ID
+
+train-select-champion: ## Phase 4 evaluate champion gate policy
+	@RUN_ID=$${RUN_ID:-$$($(VENV_PYTHON) -c "import uuid; print(uuid.uuid4())")}; \
+	$(VENV_PYTHON) -m src.training.training_orchestrator --step select-champion --run-id $$RUN_ID
+
+train-register: ## Phase 4 register champion to default stage
+	@RUN_ID=$${RUN_ID:-$$($(VENV_PYTHON) -c "import uuid; print(uuid.uuid4())")}; \
+	$(VENV_PYTHON) -m src.training.training_orchestrator --step register --run-id $$RUN_ID
+
+train-register-staging: ## Phase 4 register champion directly to Staging
+	@RUN_ID=$${RUN_ID:-$$($(VENV_PYTHON) -c "import uuid; print(uuid.uuid4())")}; \
+	$(VENV_PYTHON) -m src.training.training_orchestrator --step register-staging --run-id $$RUN_ID
+
+train-register-production: ## Phase 4 register champion and promote to Production if policy allows
+	@RUN_ID=$${RUN_ID:-$$($(VENV_PYTHON) -c "import uuid; print(uuid.uuid4())")}; \
+	$(VENV_PYTHON) -m src.training.training_orchestrator --step register-production --run-id $$RUN_ID --promote-production
+
+train-run-all: ## Phase 4 full chain prepare->baseline->candidates->compare->select->register-staging
+	@RUN_ID=$${RUN_ID:-$$($(VENV_PYTHON) -c "import uuid; print(uuid.uuid4())")}; \
+	$(VENV_PYTHON) -m src.training.training_orchestrator --step run-all --run-id $$RUN_ID
+
+train-auto: ## Automated Phase 2 build -> preflight checks -> Phase 4 run-all
+	@RUN_ID=$${RUN_ID:-$$($(VENV_PYTHON) -c "import uuid; print(uuid.uuid4())")}; \
+	$(VENV_PYTHON) -m src.training.auto_pipeline --run-id $$RUN_ID

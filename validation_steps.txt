@@ -239,3 +239,218 @@ make eda-sparsity
 make eda-fallback-policy
 make eda-docs
 make eda-validate
+
+Phase 4 test:
+
+make setup
+make up
+
+# Optional quick validation
+.venv/bin/python -m ruff check src/training tests/training
+.venv/bin/python -m pytest tests/training -q
+
+# Phase 4 end-to-end
+RUN_ID=$(python -c "import uuid; print(uuid.uuid4())"); echo $RUN_ID
+make train-prepare-data RUN_ID=$RUN_ID
+make train-show-splits RUN_ID=$RUN_ID
+make train-baseline RUN_ID=$RUN_ID
+make train-candidates RUN_ID=$RUN_ID
+make train-compare RUN_ID=$RUN_ID
+make train-track RUN_ID=$RUN_ID
+make train-select-champion RUN_ID=$RUN_ID
+make train-register-staging RUN_ID=$RUN_ID
+
+# Full one-shot chain
+make train-run-all
+
+Scenario based testing:
+
+make up
+Use a fresh run id each time:
+
+RUN_ID=$(python -c "import uuid; print(uuid.uuid4())"); echo $RUN_ID
+Inspect outputs for every scenario:
+
+cat reports/training/$RUN_ID/split_manifest.json
+cat reports/training/$RUN_ID/metrics_summary.csv
+cat reports/training/$RUN_ID/champion_decision.json
+
+1. Scenario A: Zero-demand window (expect trivial metrics)
+Set short window + current small split:
+
+python - <<'PY'
+import yaml
+t=yaml.safe_load(open("configs/training.yaml"))
+s=yaml.safe_load(open("configs/split_policy.yaml"))
+t["data"]["start_date"]="2024-01-02"; t["data"]["end_date"]="2024-01-07"; t["data"]["feature_version"]="v1"
+s["chronological_holdout"]={
+ "train_start":"2024-01-02T00:00:00+00:00","train_end":"2024-01-05T00:00:00+00:00",
+ "val_start":"2024-01-05T00:00:00+00:00","val_end":"2024-01-06T00:00:00+00:00",
+ "test_start":"2024-01-06T00:00:00+00:00","test_end":"2024-01-08T00:00:00+00:00","gap_minutes":15}
+s["rolling_origin"]={"enabled":True,"fold_count":2,"train_days":2,"val_days":1,"test_days":1,"stride_days":1,"gap_minutes":15}
+yaml.safe_dump(t,open("configs/training.yaml","w"),sort_keys=False)
+yaml.safe_dump(s,open("configs/split_policy.yaml","w"),sort_keys=False)
+PY
+RUN_ID=$(python -c "import uuid; print(uuid.uuid4())")
+make train-run-all RUN_ID=$RUN_ID || true
+
+Expected:
+Many metrics 0.0
+Gate may fail/pass depending policy
+Useful to test failure handling, not model quality
+
+2. Scenario B: Real mixed-demand window (primary quality test)
+Build richer features first:
+
+time make features-build FEATURE_START_DATE=2024-01-01 FEATURE_END_DATE=2024-03-31 FEATURE_VERSION=v1
+Set training/split to same range:
+
+python - <<'PY'
+import yaml
+t=yaml.safe_load(open("configs/training.yaml"))
+s=yaml.safe_load(open("configs/split_policy.yaml"))
+t["data"]["start_date"]="2024-01-01"; t["data"]["end_date"]="2024-03-31"; t["data"]["feature_version"]="v1"
+s["chronological_holdout"]={
+ "train_start":"2024-01-01T00:00:00+00:00","train_end":"2024-03-01T00:00:00+00:00",
+ "val_start":"2024-03-01T00:00:00+00:00","val_end":"2024-03-16T00:00:00+00:00",
+ "test_start":"2024-03-16T00:00:00+00:00","test_end":"2024-04-01T00:00:00+00:00","gap_minutes":15}
+s["rolling_origin"]={"enabled":True,"fold_count":3,"train_days":30,"val_days":7,"test_days":7,"stride_days":7,"gap_minutes":15}
+yaml.safe_dump(t,open("configs/training.yaml","w"),sort_keys=False)
+yaml.safe_dump(s,open("configs/split_policy.yaml","w"),sort_keys=False)
+PY
+RUN_ID=$(python -c "import uuid; print(uuid.uuid4())")
+make train-run-all RUN_ID=$RUN_ID
+
+Expected:
+Non-zero MAE/RMSE/WAPE/sMAPE
+Meaningful baseline vs candidate differences
+Most representative scenario
+
+3. Scenario C: Sparse-zone stress
+Use sparse zones only:
+
+python - <<'PY'
+import yaml
+t=yaml.safe_load(open("configs/training.yaml"))
+t["data"]["zones"]="4,12,13,232,256"  # replace with sparse IDs from your policy table if needed
+yaml.safe_dump(t,open("configs/training.yaml","w"),sort_keys=False)
+PY
+RUN_ID=$(python -c "import uuid; print(uuid.uuid4())")
+make train-run-all RUN_ID=$RUN_ID || true
+
+Expected:
+Sparse slice metrics degrade
+Possible gate fail on sparse regression
+
+4. Scenario D: Latency gate fail
+Force strict latency threshold:
+
+python - <<'PY'
+import yaml
+c=yaml.safe_load(open("configs/champion_policy.yaml"))
+c["gate"]["max_latency_ms_per_row"]=0.000001
+yaml.safe_dump(c,open("configs/champion_policy.yaml","w"),sort_keys=False)
+PY
+RUN_ID=$(python -c "import uuid; print(uuid.uuid4())")
+make train-run-all RUN_ID=$RUN_ID || true
+
+Expected:
+champion_decision.json includes latency_exceeds_limit
+
+5. Scenario E: Stability gate fail
+Force very strict stability:
+
+python - <<'PY'
+import yaml
+c=yaml.safe_load(open("configs/champion_policy.yaml"))
+c["gate"]["max_stability_std_wape"]=0.0001
+yaml.safe_dump(c,open("configs/champion_policy.yaml","w"),sort_keys=False)
+PY
+RUN_ID=$(python -c "import uuid; print(uuid.uuid4())")
+make train-run-all RUN_ID=$RUN_ID || true
+
+Expected:
+reason_codes includes stability_threshold_failed
+
+6. Scenario F: Baseline-dominant fail
+Require huge improvement over baseline:
+
+python - <<'PY'
+import yaml
+c=yaml.safe_load(open("configs/champion_policy.yaml"))
+c["gate"]["min_improvement_over_baseline_pct"]=0.50
+yaml.safe_dump(c,open("configs/champion_policy.yaml","w"),sort_keys=False)
+PY
+RUN_ID=$(python -c "import uuid; print(uuid.uuid4())")
+make train-run-all RUN_ID=$RUN_ID || true
+
+Expected:
+reason_codes includes did_not_beat_baseline
+
+7. Scenario G: Registration blocked on gate fail
+Run selection then register explicitly:
+
+RUN_ID=$(python -c "import uuid; print(uuid.uuid4())")
+make train-baseline RUN_ID=$RUN_ID
+make train-candidates RUN_ID=$RUN_ID
+make train-select-champion RUN_ID=$RUN_ID
+make train-register-staging RUN_ID=$RUN_ID || true
+
+Expected:
+Registration command exits non-zero if gate failed
+model_registry_audit gets failure record
+
+8. Scenario H: Full pass to staging
+Relax only what’s needed for your data:
+
+python - <<'PY'
+import yaml
+c=yaml.safe_load(open("configs/champion_policy.yaml"))
+c["gate"]["max_stability_std_wape"]=2000
+c["gate"]["max_latency_ms_per_row"]=5.0
+c["gate"]["min_improvement_over_baseline_pct"]=0.02
+yaml.safe_dump(c,open("configs/champion_policy.yaml","w"),sort_keys=False)
+PY
+RUN_ID=$(python -c "import uuid; print(uuid.uuid4())")
+make train-run-all RUN_ID=$RUN_ID
+
+Expected:
+gate_passed: true
+Model registered in MLflow Model Registry at Staging
+
+To test the entire pipeline from Phase 2 to Phase 4:
+RUN_ID=$(python -c "import uuid; print(uuid.uuid4())"); echo $RUN_ID
+make train-run-all RUN_ID=$RUN_ID
+
+Since the dataset is picked dynamically based on the dataset present at the time of model training, running the below commands to verify Phase 4:
+
+make up
+make smoke
+
+# 1) Phase 1 (ONLY if you ingested new raw trip data)
+make ingest-zone-dim
+make ingest-incremental    # or: make ingest-run-sample
+make ingest-validate
+
+# 2) Get the auto-resolved window (from configs/training.yaml)
+read START_DATE END_DATE <<< "$(.venv/bin/python -c 'from src.training.training_config import load_training_bundle; _, cfg, *_ = load_training_bundle(); print(cfg["data"]["start_date"], cfg["data"]["end_date"])')"
+echo "Using window: $START_DATE -> $END_DATE"
+
+# 3) Phase 2: build/publish features for that window
+make features-build FEATURE_START_DATE=$START_DATE FEATURE_END_DATE=$END_DATE FEATURE_VERSION=v1
+
+# 4) Phase 3: EDA (creates/updates zone_fallback_policy for p1)
+make eda-run EDA_START_DATE=$START_DATE EDA_END_DATE=$END_DATE EDA_FEATURE_VERSION=v1 EDA_POLICY_VERSION=p1
+
+# 5) Phase 4: train
+RUN_ID=$(python -c "import uuid; print(uuid.uuid4())"); echo $RUN_ID
+make train-run-all RUN_ID=$RUN_ID
+
+make train-auto RUN_ID=$RUN_ID
+
+Model evaluation flow:
+- The pipeline evaluates baselines and candidates on the same holdout window and writes their metrics to a leaderboard; the key metric is WAPE (lower is better).
+- Champion selection then does: best baseline = lowest WAPE among model_role=baseline, best candidate = lowest WAPE among model_role=candidate, and applies the “gate” rules in champion_policy.yaml (line 1) via select_champion.py (line 34).
+- The gate requires (at minimum) the best candidate to beat the best baseline by ≥ 2% relative WAPE improvement, plus it must not regress too much on the sparse_zones slice, must meet latency/stability limits, and must have an mlflow_run_id (select_champion.py (line 34)).
+- If the gate passes, that best candidate is registered as the new model version in MLflow (register_model.py (line 105)); if it fails, registration is blocked and you keep the existing champion.
+- In your latest output, linear_elasticnet is the champion because it had the lowest candidate WAPE and gate_passed: true, so it was registered as ride-demand-forecast-model version 4 in Staging.

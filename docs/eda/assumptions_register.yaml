@@ -1,4 +1,4 @@
-run_id: 79f24492-397c-41b7-9fce-0fc333afe08e
+run_id: a3c7fe37-463b-4c2b-a94a-b2bed3390186
 version: 1
 data_assumptions:
   timezone: UTC TIMESTAMPTZ storage; configurable local derivation via FEATURE_TIMEZONE
@@ -12,8 +12,8 @@ feature_assumptions:
   null_policy: configured in Phase 2 FEATURE_LAG_NULL_POLICY
 eda_assumptions:
   data_window:
-    start: '2024-01-02T00:00:00+00:00'
-    end: '2024-01-03T00:00:00+00:00'
+    start: '2025-10-04T00:00:00+00:00'
+    end: '2025-11-03T00:00:00+00:00'
     feature_version: v1
     source_rows: 263
   sparsity_thresholds:
