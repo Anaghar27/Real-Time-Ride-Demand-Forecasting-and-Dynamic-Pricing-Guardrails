@@ -89,6 +89,19 @@ Production-style local-first ML/MLOps platform for NYC TLC ride-demand forecasti
   - Staging by default
   - Production only when champion policy explicitly allows it
 
+## Phase 5 scoring scope
+- Objective: operational, leakage-safe scoring for future demand forecasts with uncertainty estimates.
+- Inputs:
+  - champion model from MLflow Model Registry (by `model_name` + `model_stage`)
+  - historical demand features from `fact_demand_features`
+  - optional sparse-zone policy from `zone_fallback_policy` to adjust confidence
+- Outputs:
+  - `demand_forecast` contract table for downstream pricing
+  - `scoring_run_log` audit table (status, window, model version, counts, latency)
+  - `confidence_reference` table (residual quantiles for prediction intervals)
+  - run artifacts in `reports/scoring/<run_id>/`
+- Scheduling: Prefect deployment on an interval; overlap protected by a Postgres advisory lock.
+
 ## Strict gate policy for Step 1.6
 Backfill commands always enforce `scripts/check_phase1_gate.py` first. Step 1.6 aborts if:
 - Step 1.1-1.5 tests are not passing
@@ -167,9 +180,32 @@ make smoke
 10. `make train-run-all`
 11. `make train-auto` (build features + preflight coverage checks + train-run-all)
 
+## Phase 5 commands
+- One-off scoring run (current time window): `make score-run`
+- Validate-only (checks + artifacts, no DB write): `make score-validate`
+- Backfill a specific forecast window (end-exclusive):
+  - `make score-run-window SCORE_FORECAST_START_TS='2025-11-03T00:00:00+00:00' SCORE_FORECAST_END_TS='2025-11-03T01:00:00+00:00'`
+- Schedule scoring with Prefect (register deployment + start worker): `make score-schedule`
+- Show URLs: `make score-show-urls`
+
 Phase 4 configuration:
 - `configs/training.yaml`: feature/training window (fixed `start_date`/`end_date` or auto-derived via `data.auto_window`).
 - `configs/split_policy.yaml`: holdout/rolling split policy (explicit timestamps or auto-derived windows).
+
+Phase 5 configuration:
+- Environment variables (optional):
+  - `SCORING_HORIZON_BUCKETS` (default `4`)
+  - `SCORING_FREQUENCY_MINUTES` (default `15`)
+  - `RIDE_DEMAND_MODEL_NAME` / `RIDE_DEMAND_MODEL_STAGE` (default stage `Staging`)
+  - `SCORING_FEATURE_VERSION` / `SCORING_POLICY_VERSION`
+
+### Phase 5 troubleshooting
+- **Model not found in registry stage**: confirm MLflow is up (`make smoke`) and the stage has a version. In MLflow UI (`make mlflow-ui`), check `Models -> ride-demand-forecast-model -> Versions`. Then set `RIDE_DEMAND_MODEL_NAME` / `RIDE_DEMAND_MODEL_STAGE` and rerun `make score-run`.
+- **Feature schema mismatch**: scoring expects the Phase 2 contract columns from `fact_demand_features` (calendar + lags + rollings). Rebuild features for the latest window (`make features-build`) and ensure `SCORING_FEATURE_VERSION` matches the published `feature_version`.
+- **Not enough history for lags/rollings**: increase `SCORING_HISTORY_DAYS` and/or backfill features further back in time. For weekly lag (`lag_672`) you typically want at least 8–14 days of history to avoid sparse/null lags.
+- **`zone_fallback_policy` missing**: scoring still runs, but confidence will not be segment-adjusted. Run Phase 3 (`make eda-run`) or create the policy table, then rerun scoring.
+- **Prefect schedule not running**: `make score-schedule` starts a local Prefect worker and blocks. In Prefect UI (`make urls`), verify the deployment exists and is scheduled, and that the worker is online.
+- **Duplicate rows / idempotency confusion**: `demand_forecast` uses `(forecast_run_key, zone_id, bucket_start_ts)` as the primary key and upserts on conflicts. If you change the horizon or model version, you will get a new `forecast_run_key` by design.
 
 Phase 3 configuration:
 - `configs/eda.yaml`: analysis window, top/bottom zone settings, report output paths.

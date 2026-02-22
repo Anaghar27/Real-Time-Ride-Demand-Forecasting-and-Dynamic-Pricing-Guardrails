@@ -454,3 +454,104 @@ Model evaluation flow:
 - The gate requires (at minimum) the best candidate to beat the best baseline by ≥ 2% relative WAPE improvement, plus it must not regress too much on the sparse_zones slice, must meet latency/stability limits, and must have an mlflow_run_id (select_champion.py (line 34)).
 - If the gate passes, that best candidate is registered as the new model version in MLflow (register_model.py (line 105)); if it fails, registration is blocked and you keep the existing champion.
 - In your latest output, linear_elasticnet is the champion because it had the lowest candidate WAPE and gate_passed: true, so it was registered as ride-demand-forecast-model version 4 in Staging.
+
+
+Phase 5 test:
+
+1) Bring stack up
+
+make setup
+make up
+make smoke
+2) Build upstream (Phase 2–4) for the latest training window
+
+read START_DATE END_DATE <<< "$(.venv/bin/python -c 'from src.training.training_config import load_training_bundle; _, cfg, *_ = load_training_bundle(); print(cfg["data"]["start_date"], cfg["data"]["end_date"])')"
+echo "Window: $START_DATE -> $END_DATE"
+
+make features-build FEATURE_START_DATE=$START_DATE FEATURE_END_DATE=$END_DATE FEATURE_VERSION=v1
+make eda-run EDA_START_DATE=$START_DATE EDA_END_DATE=$END_DATE EDA_FEATURE_VERSION=v1 EDA_POLICY_VERSION=p1
+
+RUN_ID=$(python -c "import uuid; print(uuid.uuid4())")
+make train-auto RUN_ID=$RUN_ID
+3) Compute aligned Phase 5 backfill window (1 hour)
+
+read SCORE_START SCORE_END <<< "$(END_DATE="$END_DATE" .venv/bin/python - <<'PY'
+import os
+from datetime import datetime, timedelta, timezone
+end_date = datetime.fromisoformat(os.environ["END_DATE"]).replace(tzinfo=timezone.utc)
+start = end_date + timedelta(days=1)
+end = start + timedelta(hours=1)
+print(start.isoformat(), end.isoformat())
+PY
+)"
+echo "Scoring window: $SCORE_START -> $SCORE_END"
+4) Phase 5 validate-only
+
+RUN_ID=$(python -c "import uuid; print(uuid.uuid4())")
+SCORING_FORECAST_START_TS="$SCORE_START" \
+SCORING_FORECAST_END_TS="$SCORE_END" \
+make score-validate RUN_ID=$RUN_ID
+5) Phase 5 write run
+
+RUN_ID=$(python -c "import uuid; print(uuid.uuid4())")
+make score-run-window RUN_ID=$RUN_ID \
+  SCORE_FORECAST_START_TS="$SCORE_START" \
+  SCORE_FORECAST_END_TS="$SCORE_END"
+6) Verify run statuses
+
+.venv/bin/python - <<'PY'
+from sqlalchemy import text
+from src.common.db import engine
+q = """
+SELECT run_id,status,started_at,forecast_start_ts,forecast_end_ts,row_count,failure_reason
+FROM scoring_run_log
+ORDER BY started_at DESC
+LIMIT 10
+"""
+with engine.begin() as c:
+    for r in c.execute(text(q)).mappings():
+        print(dict(r))
+PY
+7) Verify forecast rows were written
+
+.venv/bin/python - <<'PY'
+from sqlalchemy import text
+from src.common.db import engine
+q = """
+SELECT forecast_run_key, COUNT(*) AS rows, MIN(bucket_start_ts) AS min_ts, MAX(bucket_start_ts) AS max_ts
+FROM demand_forecast
+GROUP BY forecast_run_key
+ORDER BY max_ts DESC
+LIMIT 5
+"""
+with engine.begin() as c:
+    for r in c.execute(text(q)).mappings():
+        print(dict(r))
+PY
+8) Verify artifacts
+
+ls -lt reports/scoring | head
+9) (Optional) Verify scheduler
+
+make score-schedule
+Keep it running in terminal 1. In terminal 2:
+
+while true; do
+  clear
+  date
+  .venv/bin/python - <<'PY'
+from sqlalchemy import text
+from src.common.db import engine
+q = """
+SELECT run_id,status,started_at,forecast_start_ts,failure_reason
+FROM scoring_run_log
+ORDER BY started_at DESC
+LIMIT 5
+"""
+with engine.begin() as c:
+    for r in c.execute(text(q)).mappings():
+        print(dict(r))
+PY
+  sleep 30
+done
+Stop with Ctrl+C.

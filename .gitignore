@@ -33,3 +33,5 @@ data/landing/
 
 # Generated reports
 reports/training/
+reports/scoring/*
+!reports/scoring/.gitkeep

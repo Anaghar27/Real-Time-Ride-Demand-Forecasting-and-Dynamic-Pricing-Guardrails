@@ -10,8 +10,9 @@ COMPOSE := docker compose --env-file .env -f infra/docker-compose.yml
 VENV_PYTHON := .venv/bin/python
 VENV_PIP := .venv/bin/pip
 VENV_UVICORN := .venv/bin/uvicorn
+VENV_PREFECT := .venv/bin/prefect
 
-.PHONY: help setup up down restart logs ps api test lint format typecheck check clean db-shell smoke mlflow-ui urls ingest-sample-download ingest-zone-dim ingest-load-sample ingest-validate ingest-run-sample ingest-rerun-sample ingest-gate-check ingest-backfill-pilot ingest-backfill-full ingest-incremental features-time-buckets features-aggregate features-calendar features-lag-roll features-validate features-publish features-build eda-seasonality eda-sparsity eda-fallback-policy eda-docs eda-validate eda-run train-prepare-data train-show-splits train-baseline train-candidates train-compare train-track train-select-champion train-register train-register-staging train-register-production train-run-all train-auto
+.PHONY: help setup up down restart logs ps api test lint format typecheck check clean db-shell smoke mlflow-ui urls ingest-sample-download ingest-zone-dim ingest-load-sample ingest-validate ingest-run-sample ingest-rerun-sample ingest-gate-check ingest-backfill-pilot ingest-backfill-full ingest-incremental features-time-buckets features-aggregate features-calendar features-lag-roll features-validate features-publish features-build eda-seasonality eda-sparsity eda-fallback-policy eda-docs eda-validate eda-run train-prepare-data train-show-splits train-baseline train-candidates train-compare train-track train-select-champion train-register train-register-staging train-register-production train-run-all train-auto score-run score-run-window score-validate score-schedule score-show-urls
 
 FEATURE_START_DATE ?= 2024-01-01
 FEATURE_END_DATE ?= 2024-01-07
@@ -23,6 +24,8 @@ EDA_FEATURE_VERSION ?= v1
 EDA_POLICY_VERSION ?= p1
 EDA_ZONES ?=
 EDA_RUN_ID ?=
+SCORE_FORECAST_START_TS ?=
+SCORE_FORECAST_END_TS ?=
 
 help: ## Show available commands
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "%-12s %s\n", $$1, $$2}'
@@ -233,3 +236,34 @@ train-run-all: ## Phase 4 full chain prepare->baseline->candidates->compare->sel
 train-auto: ## Automated Phase 2 build -> preflight checks -> Phase 4 run-all
 	@RUN_ID=$${RUN_ID:-$$($(VENV_PYTHON) -c "import uuid; print(uuid.uuid4())")}; \
 	$(VENV_PYTHON) -m src.training.auto_pipeline --run-id $$RUN_ID
+
+score-run: ## Phase 5 run scoring once for current time window
+	@RUN_ID=$${RUN_ID:-$$($(VENV_PYTHON) -c "import uuid; print(uuid.uuid4())")}; \
+	$(VENV_PYTHON) -m src.scoring.scoring_orchestrator --run-id $$RUN_ID
+
+score-run-window: ## Phase 5 run scoring for explicit forecast start/end overrides
+	@RUN_ID=$${RUN_ID:-$$($(VENV_PYTHON) -c "import uuid; print(uuid.uuid4())")}; \
+	if [ -z "$(SCORE_FORECAST_START_TS)" ] || [ -z "$(SCORE_FORECAST_END_TS)" ]; then \
+		echo "Set SCORE_FORECAST_START_TS and SCORE_FORECAST_END_TS (ISO8601, end-exclusive)"; \
+		exit 1; \
+	fi; \
+	$(VENV_PYTHON) -m src.scoring.scoring_orchestrator --run-id $$RUN_ID --forecast-start-ts "$(SCORE_FORECAST_START_TS)" --forecast-end-ts "$(SCORE_FORECAST_END_TS)"
+
+score-validate: ## Phase 5 run scoring checks without writing forecasts
+	@RUN_ID=$${RUN_ID:-$$($(VENV_PYTHON) -c "import uuid; print(uuid.uuid4())")}; \
+	$(VENV_PYTHON) -m src.scoring.scoring_orchestrator --run-id $$RUN_ID --validate-only
+
+score-schedule: ## Phase 5 register Prefect deployment and start a local worker (blocks)
+	@$(VENV_PREFECT) work-pool inspect "$${SCORING_PREFECT_WORK_POOL:-scoring-process}" >/dev/null 2>&1 || \
+		$(VENV_PREFECT) work-pool create "$${SCORING_PREFECT_WORK_POOL:-scoring-process}" --type process; \
+	$(VENV_PREFECT) work-queue create "$${SCORING_PREFECT_WORK_QUEUE:-scoring}" --pool "$${SCORING_PREFECT_WORK_POOL:-scoring-process}" >/dev/null 2>&1 || true; \
+	$(VENV_PREFECT) work-queue set-concurrency-limit "$${SCORING_PREFECT_WORK_QUEUE:-scoring}" 1 --pool "$${SCORING_PREFECT_WORK_POOL:-scoring-process}" >/dev/null 2>&1 || true; \
+	$(VENV_PYTHON) -m src.scoring.scoring_job --apply-deployment; \
+	$(VENV_PREFECT) worker start --pool "$${SCORING_PREFECT_WORK_POOL:-scoring-process}" --work-queue "$${SCORING_PREFECT_WORK_QUEUE:-scoring}"
+
+score-show-urls: ## Print scoring-relevant local URLs
+	@echo "MLflow:      http://localhost:5001"
+	@echo "Prefect:     http://localhost:4200"
+	@echo "API:         http://localhost:$(API_PORT)"
+	@echo "Prometheus:  http://localhost:$(PROMETHEUS_PORT)"
+	@echo "Grafana:     http://localhost:$(GRAFANA_PORT)"
