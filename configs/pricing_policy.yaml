@@ -1,0 +1,57 @@
+pricing_policy_version: "pr1"
+forecast_table_name: "demand_forecast"
+pricing_output_table_name: "pricing_decisions"
+forecast_selection_mode: "latest_run"
+
+pricing_created_at:
+  mode: "current_time"
+  override_ts: null
+
+run_timezone: "UTC"
+default_floor_multiplier: 1.0
+global_cap_multiplier: 2.5
+cap_by_confidence_band:
+  low: 1.55
+  medium: 2.0
+  high: 2.35
+cap_by_zone_class:
+  robust: 2.5
+  medium: 2.2
+  sparse: 1.75
+  ultra_sparse: 1.55
+cap_by_time_category:
+  peak: 2.45
+  off_peak: 2.1
+
+max_increase_per_bucket: 0.35
+max_decrease_per_bucket: 0.25
+
+smoothing_enabled: true
+smoothing_alpha: 0.75
+
+low_confidence_adjustment:
+  enabled: true
+  confidence_threshold: 0.30
+  dampening_factor: 0.75
+  uncertainty_bands: []
+
+baseline_reference_mode: "fact_feature_average"
+baseline_lookback_days: 28
+baseline_min_value: 0.5
+
+allow_discounting: false
+discount_floor_multiplier: 1.0
+cold_start_multiplier: 1.2
+max_zones: null
+
+strict_checks: true
+coverage_threshold_pct: 0.95
+row_count_tolerance_pct: 0.02
+
+policy_snapshot_enabled: true
+report_sample_size: 300
+
+prefect:
+  schedule_minutes: 15
+  work_pool: "pricing-process"
+  work_queue: "pricing"

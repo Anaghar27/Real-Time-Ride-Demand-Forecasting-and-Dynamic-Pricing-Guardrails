@@ -1,0 +1,42 @@
+policy_version: "pr1"
+active_method: "demand_ratio_piecewise"
+
+methods:
+  demand_ratio_piecewise:
+    breakpoints:
+      - ratio: 0.0
+        multiplier: 1.0
+      - ratio: 0.9
+        multiplier: 1.0
+      - ratio: 1.0
+        multiplier: 1.05
+      - ratio: 1.15
+        multiplier: 1.2
+      - ratio: 1.35
+        multiplier: 1.45
+      - ratio: 1.7
+        multiplier: 1.85
+      - ratio: 2.2
+        multiplier: 2.25
+
+  threshold_bands:
+    metric: "demand_ratio"
+    bands:
+      - min_inclusive: 0.0
+        max_exclusive: 0.9
+        multiplier: 1.0
+      - min_inclusive: 0.9
+        max_exclusive: 1.1
+        multiplier: 1.05
+      - min_inclusive: 1.1
+        max_exclusive: 1.35
+        multiplier: 1.25
+      - min_inclusive: 1.35
+        max_exclusive: 1.7
+        multiplier: 1.55
+      - min_inclusive: 1.7
+        max_exclusive: null
+        multiplier: 1.95
+
+high_demand_ratio_threshold: 1.25
+normal_demand_ratio_threshold: 1.0

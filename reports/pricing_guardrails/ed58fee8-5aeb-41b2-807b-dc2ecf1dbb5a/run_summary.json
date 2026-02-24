@@ -1,0 +1,5 @@
+{
+  "run_id": "ed58fee8-5aeb-41b2-807b-dc2ecf1dbb5a",
+  "status": "failed",
+  "error": "Cannot pass a datetime or Timestamp with tzinfo with the tz parameter. Use tz_convert instead."
+}

@@ -555,3 +555,41 @@ PY
   sleep 30
 done
 Stop with Ctrl+C.
+
+
+Phase 6 tests:
+
+1. Start dependencies
+make up
+
+2. Ensure Phase 5 forecasts exist (Phase 6 consumes demand_forecast)
+make score-run
+
+3. Validate policy/schema wiring only
+make pricing-load-policy
+
+4.Dry-run quality checks (no pricing write)
+make pricing-validate
+
+5.Full Phase 6 write path
+make pricing-run
+
+6.Optional explicit replay window test
+make pricing-run-window \
+  PRICE_FORECAST_START_TS='2026-02-24T00:00:00+00:00' \
+  PRICE_FORECAST_END_TS='2026-02-24T01:00:00+00:00'
+
+7.Run pricing test suite
+.venv/bin/python -m pytest tests/pricing_guardrails -q
+
+8. Inspect outputs
+docker compose --env-file .env -f infra/docker-compose.yml exec -T postgres \
+  psql -U ride_user -d ride_demand \
+  -c "SELECT run_id,status,row_count,started_at FROM pricing_run_log ORDER BY started_at DESC LIMIT 5;"
+
+docker compose --env-file .env -f infra/docker-compose.yml exec -T postgres \
+  psql -U ride_user -d ride_demand \
+  -c "SELECT zone_id,bucket_start_ts,final_multiplier,primary_reason_code FROM pricing_decisions ORDER BY pricing_created_at DESC LIMIT 20;"
+
+9.Check artifacts
+ls -la reports/pricing_guardrails

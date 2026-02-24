@@ -1,0 +1,71 @@
+policy_version: "pr1"
+
+priority_order:
+  - CAP_APPLIED_GLOBAL
+  - CAP_APPLIED_CONFIDENCE
+  - CAP_APPLIED_SPARSE_ZONE
+  - FLOOR_APPLIED
+  - RATE_LIMIT_INCREASE_CLAMP
+  - RATE_LIMIT_DECREASE_CLAMP
+  - LOW_CONFIDENCE_DAMPENING
+  - NO_PREVIOUS_MULTIPLIER_COLD_START
+  - SPARSE_ZONE_POLICY_ACTIVE
+  - MISSING_BASELINE_REFERENCE_FALLBACK
+  - HIGH_DEMAND_RATIO
+  - NORMAL_DEMAND_BASELINE
+  - BASELINE_FALLBACK_ZONE
+  - BASELINE_FALLBACK_BOROUGH
+  - BASELINE_FALLBACK_CITY
+  - SMOOTHING_APPLIED
+
+codes:
+  HIGH_DEMAND_RATIO:
+    category: signal
+    description: Demand forecast is significantly above baseline reference.
+  NORMAL_DEMAND_BASELINE:
+    category: signal
+    description: Demand forecast is near historical baseline levels.
+  LOW_CONFIDENCE_DAMPENING:
+    category: signal
+    description: Raw multiplier increase was dampened due to low confidence.
+  BASELINE_FALLBACK_ZONE:
+    category: signal
+    description: Baseline reference was available at zone level.
+  BASELINE_FALLBACK_BOROUGH:
+    category: signal
+    description: Zone baseline was missing, borough baseline was used.
+  BASELINE_FALLBACK_CITY:
+    category: signal
+    description: Zone and borough baselines were missing, city baseline was used.
+
+  FLOOR_APPLIED:
+    category: guardrail
+    description: Candidate multiplier was raised to policy floor.
+  CAP_APPLIED_GLOBAL:
+    category: guardrail
+    description: Candidate multiplier was clipped by global policy cap.
+  CAP_APPLIED_CONFIDENCE:
+    category: guardrail
+    description: Candidate multiplier was clipped by confidence contextual cap.
+  CAP_APPLIED_SPARSE_ZONE:
+    category: guardrail
+    description: Candidate multiplier was clipped by sparse-zone contextual cap.
+  RATE_LIMIT_INCREASE_CLAMP:
+    category: guardrail
+    description: Candidate multiplier upward movement was rate-limited.
+  RATE_LIMIT_DECREASE_CLAMP:
+    category: guardrail
+    description: Candidate multiplier downward movement was rate-limited.
+  SMOOTHING_APPLIED:
+    category: guardrail
+    description: EMA smoothing was applied after rate limiting.
+
+  NO_PREVIOUS_MULTIPLIER_COLD_START:
+    category: fallback
+    description: No previous multiplier existed, cold-start multiplier was used.
+  SPARSE_ZONE_POLICY_ACTIVE:
+    category: fallback
+    description: Sparse-zone policy class is active for this zone.
+  MISSING_BASELINE_REFERENCE_FALLBACK:
+    category: fallback
+    description: Baseline fallback reached global minimum because no baseline source was found.

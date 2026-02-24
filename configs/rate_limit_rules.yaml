@@ -1,0 +1,11 @@
+policy_version: "pr1"
+
+cold_start_multiplier: 1.2
+max_increase_per_bucket: 0.35
+max_decrease_per_bucket: 0.25
+
+smoothing:
+  enabled: true
+  alpha: 0.75
+
+enforce_post_smoothing_clamp: true

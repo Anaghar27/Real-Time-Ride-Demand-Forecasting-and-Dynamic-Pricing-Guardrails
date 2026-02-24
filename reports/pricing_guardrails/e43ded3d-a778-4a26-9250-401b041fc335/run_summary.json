@@ -1,0 +1,20 @@
+{
+  "run_id": "e43ded3d-a778-4a26-9250-401b041fc335",
+  "status": "succeeded",
+  "step": "save",
+  "pricing_run_key": "6dbef0861d46325032ed635e",
+  "forecast_run_id": "01f7d7e5-26bb-4ee7-a59d-6e57d7e44131",
+  "target_bucket_start": "2025-11-02T19:00:00+00:00",
+  "target_bucket_end": "2025-11-02T20:00:00+00:00",
+  "row_count": 1052,
+  "zone_count": 263,
+  "written_rows": 1052,
+  "cap_applied_count": 142,
+  "rate_limited_count": 146,
+  "low_confidence_count": 822,
+  "check_summary": {
+    "passed": true,
+    "failures": [],
+    "warnings": []
+  }
+}

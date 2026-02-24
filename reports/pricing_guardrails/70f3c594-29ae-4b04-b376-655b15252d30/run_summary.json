@@ -1,0 +1,10 @@
+{
+  "run_id": "70f3c594-29ae-4b04-b376-655b15252d30",
+  "status": "succeeded",
+  "step": "validate",
+  "check_summary": {
+    "passed": true,
+    "failures": [],
+    "warnings": []
+  }
+}

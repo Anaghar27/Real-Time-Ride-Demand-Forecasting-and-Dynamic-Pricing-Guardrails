@@ -12,7 +12,7 @@ VENV_PIP := .venv/bin/pip
 VENV_UVICORN := .venv/bin/uvicorn
 VENV_PREFECT := .venv/bin/prefect
 
-.PHONY: help setup up down restart logs ps api test lint format typecheck check clean db-shell smoke mlflow-ui urls ingest-sample-download ingest-zone-dim ingest-load-sample ingest-validate ingest-run-sample ingest-rerun-sample ingest-gate-check ingest-backfill-pilot ingest-backfill-full ingest-incremental features-time-buckets features-aggregate features-calendar features-lag-roll features-validate features-publish features-build eda-seasonality eda-sparsity eda-fallback-policy eda-docs eda-validate eda-run train-prepare-data train-show-splits train-baseline train-candidates train-compare train-track train-select-champion train-register train-register-staging train-register-production train-run-all train-auto score-run score-run-window score-validate score-schedule score-show-urls
+.PHONY: help setup up down restart logs ps api test lint format typecheck check clean db-shell smoke mlflow-ui urls ingest-sample-download ingest-zone-dim ingest-load-sample ingest-validate ingest-run-sample ingest-rerun-sample ingest-gate-check ingest-backfill-pilot ingest-backfill-full ingest-incremental features-time-buckets features-aggregate features-calendar features-lag-roll features-validate features-publish features-build eda-seasonality eda-sparsity eda-fallback-policy eda-docs eda-validate eda-run train-prepare-data train-show-splits train-baseline train-candidates train-compare train-track train-select-champion train-register train-register-staging train-register-production train-run-all train-auto score-run score-run-window score-validate score-schedule score-show-urls pricing-load-policy pricing-compute-raw pricing-apply-caps pricing-apply-rate-limit pricing-reason-codes pricing-save pricing-validate pricing-run pricing-run-window pricing-run-all pricing-schedule pricing-show-urls pricing-evaluate
 
 FEATURE_START_DATE ?= 2024-01-01
 FEATURE_END_DATE ?= 2024-01-07
@@ -26,6 +26,9 @@ EDA_ZONES ?=
 EDA_RUN_ID ?=
 SCORE_FORECAST_START_TS ?=
 SCORE_FORECAST_END_TS ?=
+PRICE_FORECAST_START_TS ?=
+PRICE_FORECAST_END_TS ?=
+PRICE_FORECAST_RUN_ID ?=
 
 help: ## Show available commands
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "%-12s %s\n", $$1, $$2}'
@@ -267,3 +270,75 @@ score-show-urls: ## Print scoring-relevant local URLs
 	@echo "API:         http://localhost:$(API_PORT)"
 	@echo "Prometheus:  http://localhost:$(PROMETHEUS_PORT)"
 	@echo "Grafana:     http://localhost:$(GRAFANA_PORT)"
+
+pricing-load-policy: ## Phase 6 load and validate pricing policy files and snapshots
+	@RUN_ID=$${RUN_ID:-$$($(VENV_PYTHON) -c "import uuid; print(uuid.uuid4())")}; \
+	$(VENV_PYTHON) -m src.pricing_guardrails.pricing_orchestrator --run-id $$RUN_ID --step load-policy
+
+pricing-compute-raw: ## Phase 6 compute raw multipliers from forecast + baseline
+	@RUN_ID=$${RUN_ID:-$$($(VENV_PYTHON) -c "import uuid; print(uuid.uuid4())")}; \
+	$(VENV_PYTHON) -m src.pricing_guardrails.pricing_orchestrator --run-id $$RUN_ID --step compute-raw
+
+pricing-apply-caps: ## Phase 6 apply floor and cap guardrails
+	@RUN_ID=$${RUN_ID:-$$($(VENV_PYTHON) -c "import uuid; print(uuid.uuid4())")}; \
+	$(VENV_PYTHON) -m src.pricing_guardrails.pricing_orchestrator --run-id $$RUN_ID --step apply-caps
+
+pricing-apply-rate-limit: ## Phase 6 apply rate limiter and optional smoothing
+	@RUN_ID=$${RUN_ID:-$$($(VENV_PYTHON) -c "import uuid; print(uuid.uuid4())")}; \
+	$(VENV_PYTHON) -m src.pricing_guardrails.pricing_orchestrator --run-id $$RUN_ID --step apply-rate-limit
+
+pricing-reason-codes: ## Phase 6 generate reason codes and summaries
+	@RUN_ID=$${RUN_ID:-$$($(VENV_PYTHON) -c "import uuid; print(uuid.uuid4())")}; \
+	$(VENV_PYTHON) -m src.pricing_guardrails.pricing_orchestrator --run-id $$RUN_ID --step reason-codes
+
+pricing-save: ## Phase 6 save pricing decisions (idempotent upsert)
+	@RUN_ID=$${RUN_ID:-$$($(VENV_PYTHON) -c "import uuid; print(uuid.uuid4())")}; \
+	$(VENV_PYTHON) -m src.pricing_guardrails.pricing_orchestrator --run-id $$RUN_ID --step save
+
+pricing-validate: ## Phase 6 run quality checks without writing pricing decisions
+	@RUN_ID=$${RUN_ID:-$$($(VENV_PYTHON) -c "import uuid; print(uuid.uuid4())")}; \
+	$(VENV_PYTHON) -m src.pricing_guardrails.pricing_orchestrator --run-id $$RUN_ID --step validate
+
+pricing-run: ## Phase 6 run pricing once for latest forecast selection mode
+	@RUN_ID=$${RUN_ID:-$$($(VENV_PYTHON) -c "import uuid; print(uuid.uuid4())")}; \
+	$(VENV_PYTHON) -m src.pricing_guardrails.pricing_orchestrator --run-id $$RUN_ID --step save
+
+pricing-run-window: ## Phase 6 run pricing for explicit forecast window (end-exclusive)
+	@RUN_ID=$${RUN_ID:-$$($(VENV_PYTHON) -c "import uuid; print(uuid.uuid4())")}; \
+	if [ -z "$(PRICE_FORECAST_START_TS)" ] || [ -z "$(PRICE_FORECAST_END_TS)" ]; then \
+		echo "Set PRICE_FORECAST_START_TS and PRICE_FORECAST_END_TS (ISO8601, end-exclusive)"; \
+		exit 1; \
+	fi; \
+	PRICING_FORECAST_SELECTION_MODE=explicit_window \
+	PRICING_FORECAST_START_TS="$(PRICE_FORECAST_START_TS)" \
+	PRICING_FORECAST_END_TS="$(PRICE_FORECAST_END_TS)" \
+	$(VENV_PYTHON) -m src.pricing_guardrails.pricing_orchestrator --run-id $$RUN_ID --step save --forecast-run-id "$(PRICE_FORECAST_RUN_ID)" --forecast-start-ts "$(PRICE_FORECAST_START_TS)" --forecast-end-ts "$(PRICE_FORECAST_END_TS)"
+
+pricing-run-all: ## Phase 6 ordered chain: load-policy -> compute-raw -> apply-caps -> apply-rate-limit -> reason-codes -> validate -> save
+	@RUN_ID=$${RUN_ID:-$$($(VENV_PYTHON) -c "import uuid; print(uuid.uuid4())")}; \
+	$(VENV_PYTHON) -m src.pricing_guardrails.pricing_orchestrator --run-id $$RUN_ID --step load-policy; \
+	$(VENV_PYTHON) -m src.pricing_guardrails.pricing_orchestrator --run-id $$RUN_ID --step compute-raw; \
+	$(VENV_PYTHON) -m src.pricing_guardrails.pricing_orchestrator --run-id $$RUN_ID --step apply-caps; \
+	$(VENV_PYTHON) -m src.pricing_guardrails.pricing_orchestrator --run-id $$RUN_ID --step apply-rate-limit; \
+	$(VENV_PYTHON) -m src.pricing_guardrails.pricing_orchestrator --run-id $$RUN_ID --step reason-codes; \
+	$(VENV_PYTHON) -m src.pricing_guardrails.pricing_orchestrator --run-id $$RUN_ID --step validate; \
+	$(VENV_PYTHON) -m src.pricing_guardrails.pricing_orchestrator --run-id $$RUN_ID --step save
+
+pricing-schedule: ## Phase 6 register pricing deployment and start local worker (blocks)
+	@$(VENV_PREFECT) work-pool inspect "$${PRICING_PREFECT_WORK_POOL:-pricing-process}" >/dev/null 2>&1 || \
+		$(VENV_PREFECT) work-pool create "$${PRICING_PREFECT_WORK_POOL:-pricing-process}" --type process; \
+	$(VENV_PREFECT) work-queue create "$${PRICING_PREFECT_WORK_QUEUE:-pricing}" --pool "$${PRICING_PREFECT_WORK_POOL:-pricing-process}" >/dev/null 2>&1 || true; \
+	$(VENV_PREFECT) work-queue set-concurrency-limit "$${PRICING_PREFECT_WORK_QUEUE:-pricing}" 1 --pool "$${PRICING_PREFECT_WORK_POOL:-pricing-process}" >/dev/null 2>&1 || true; \
+	$(VENV_PYTHON) -m src.pricing_guardrails.pricing_job --apply-deployment; \
+	$(VENV_PREFECT) worker start --pool "$${PRICING_PREFECT_WORK_POOL:-pricing-process}" --work-queue "$${PRICING_PREFECT_WORK_QUEUE:-pricing}"
+
+pricing-show-urls: ## Print pricing-relevant local URLs
+	@echo "MLflow:      http://localhost:5001"
+	@echo "Prefect:     http://localhost:4200"
+	@echo "API:         http://localhost:$(API_PORT)"
+	@echo "Prometheus:  http://localhost:$(PROMETHEUS_PORT)"
+	@echo "Grafana:     http://localhost:$(GRAFANA_PORT)"
+
+pricing-evaluate: ## Phase 6 run market evaluation query pack for latest successful pricing run
+	@cat sql/pricing_guardrails/market_evaluation_queries.sql | \
+	$(COMPOSE) exec -T postgres psql -U $(POSTGRES_USER) -d $(POSTGRES_DB)

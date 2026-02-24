@@ -102,6 +102,20 @@ Production-style local-first ML/MLOps platform for NYC TLC ride-demand forecasti
   - run artifacts in `reports/scoring/<run_id>/`
 - Scheduling: Prefect deployment on an interval; overlap protected by a Postgres advisory lock.
 
+## Phase 6 pricing guardrails scope
+- Objective: transform Phase 5 forecasts into safe, explainable, and rerun-safe pricing decisions.
+- Inputs:
+  - `demand_forecast` output rows from Phase 5 (`zone_id`, `bucket_start_ts`, `y_pred`, confidence fields, provenance)
+  - config-driven policy YAML files for multiplier logic, caps, rate limits, and reason taxonomy
+  - optional sparse-zone classes from `zone_fallback_policy`
+- Outputs:
+  - `pricing_decisions` contract table (raw + guarded multipliers, diagnostics, reason codes)
+  - `pricing_run_log` audit table (status, counts, latency, policy version, failure reason)
+  - policy snapshot tables (`pricing_policy_snapshot`, `multiplier_rule_snapshot`, `rate_limit_rule_snapshot`)
+  - reason code reference table (`reason_code_reference`)
+  - run artifacts in `reports/pricing_guardrails/<run_id>/`
+- Scheduling: Prefect deployment with retries; run overlap blocked by Postgres advisory lock.
+
 ## Strict gate policy for Step 1.6
 Backfill commands always enforce `scripts/check_phase1_gate.py` first. Step 1.6 aborts if:
 - Step 1.1-1.5 tests are not passing
@@ -188,6 +202,25 @@ make smoke
 - Schedule scoring with Prefect (register deployment + start worker): `make score-schedule`
 - Show URLs: `make score-show-urls`
 
+## Phase 6 commands
+- Load and validate policy files: `make pricing-load-policy`
+- Compute raw multipliers only: `make pricing-compute-raw`
+- Apply cap guardrails only: `make pricing-apply-caps`
+- Apply rate limiter only: `make pricing-apply-rate-limit`
+- Generate reason codes only: `make pricing-reason-codes`
+- Validate pricing checks (no save): `make pricing-validate`
+- Save pricing decisions (full run): `make pricing-save`
+- One-off pricing run (latest mode): `make pricing-run`
+- Replay/backfill explicit window (end-exclusive):
+  - `make pricing-run-window PRICE_FORECAST_START_TS='2025-11-03T00:00:00+00:00' PRICE_FORECAST_END_TS='2025-11-03T01:00:00+00:00'`
+  - optional run pin: add `PRICE_FORECAST_RUN_ID='<forecast_run_id>'`
+- Ordered chain run (`load-policy -> compute-raw -> apply-caps -> apply-rate-limit -> reason-codes -> validate -> save`):
+  - `make pricing-run-all`
+- Run market evaluation query pack (latest succeeded pricing run):
+  - `make pricing-evaluate`
+- Schedule pricing with Prefect (register deployment + start worker): `make pricing-schedule`
+- Show URLs: `make pricing-show-urls`
+
 Phase 4 configuration:
 - `configs/training.yaml`: feature/training window (fixed `start_date`/`end_date` or auto-derived via `data.auto_window`).
 - `configs/split_policy.yaml`: holdout/rolling split policy (explicit timestamps or auto-derived windows).
@@ -201,6 +234,23 @@ Phase 5 configuration:
   - `SCORING_STALE_DATA_FALLBACK_ENABLED` (`true/false`, default `false`)
   - `SCORING_STALE_DATA_FLOOR_START_TS` (ISO8601 UTC floor used only when stale fallback is enabled)
 
+Phase 6 configuration:
+- YAML files:
+  - `configs/pricing_policy.yaml`
+  - `configs/multiplier_rules.yaml`
+  - `configs/rate_limit_rules.yaml`
+  - `configs/reason_codes.yaml`
+- Environment variables (optional):
+  - `PRICING_POLICY_VERSION`
+  - `PRICING_FORECAST_SELECTION_MODE` (`latest_run`, `explicit_run_id`, `explicit_window`)
+  - `PRICING_FORECAST_RUN_ID`
+  - `PRICING_FORECAST_START_TS`, `PRICING_FORECAST_END_TS`
+  - `PRICING_DEFAULT_FLOOR_MULTIPLIER`, `PRICING_GLOBAL_CAP_MULTIPLIER`
+  - `PRICING_MAX_INCREASE_PER_BUCKET`, `PRICING_MAX_DECREASE_PER_BUCKET`
+  - `PRICING_SMOOTHING_ENABLED`, `PRICING_SMOOTHING_ALPHA`
+  - `PRICING_STRICT_CHECKS`
+  - `PRICING_PREFECT_WORK_POOL`, `PRICING_PREFECT_WORK_QUEUE`
+
 ### Phase 5 troubleshooting
 - **Model not found in registry stage**: confirm MLflow is up (`make smoke`) and the stage has a version. In MLflow UI (`make mlflow-ui`), check `Models -> ride-demand-forecast-model -> Versions`. Then set `RIDE_DEMAND_MODEL_NAME` / `RIDE_DEMAND_MODEL_STAGE` and rerun `make score-run`.
 - **Feature schema mismatch**: scoring expects the Phase 2 contract columns from `fact_demand_features` (calendar + lags + rollings). Rebuild features for the latest window (`make features-build`) and ensure `SCORING_FEATURE_VERSION` matches the published `feature_version`.
@@ -209,6 +259,22 @@ Phase 5 configuration:
 - **`zone_fallback_policy` missing**: scoring still runs, but confidence will not be segment-adjusted. Run Phase 3 (`make eda-run`) or create the policy table, then rerun scoring.
 - **Prefect schedule not running**: `make score-schedule` starts a local Prefect worker and blocks. In Prefect UI (`make urls`), verify the deployment exists and is scheduled, and that the worker is online.
 - **Duplicate rows / idempotency confusion**: `demand_forecast` uses `(forecast_run_key, zone_id, bucket_start_ts)` as the primary key and upserts on conflicts. If you change the horizon or model version, you will get a new `forecast_run_key` by design.
+
+### Phase 6 troubleshooting
+- **Missing forecast rows**: verify `demand_forecast` has rows for the requested selection mode and window. For explicit window runs, confirm `PRICE_FORECAST_START_TS` and `PRICE_FORECAST_END_TS` are UTC ISO8601 and end-exclusive.
+- **Invalid policy config**: run `make pricing-load-policy` and fix reported missing keys/version mismatch across `pricing_policy.yaml`, `multiplier_rules.yaml`, `rate_limit_rules.yaml`, and `reason_codes.yaml`.
+- **Rate limiter violations**: run `make pricing-validate`, then inspect `reports/pricing_guardrails/<run_id>/run_summary.json` and `guardrail_stats.csv` for delta-bound failures.
+- **Duplicate writes due to key mismatch**: verify `pricing_run_key` inputs are stable (`pricing_policy_version + forecast_run_id + target_bucket_start + target_bucket_end`) and confirm table unique key is `(pricing_run_key, zone_id, bucket_start_ts)`.
+- **Missing previous multiplier cold-starts**: expected for new zones or first pricing run; rows should include `NO_PREVIOUS_MULTIPLIER_COLD_START` and use configured cold-start multiplier.
+
+### Phase 6 market evaluation
+- Query pack file: `sql/pricing_guardrails/market_evaluation_queries.sql`
+- Guide: `docs/pricing_guardrails/market_evaluation_queries.md`
+- Scope:
+  - forecast error vs baseline demand reference
+  - non-causal lift proxies (raw vs guarded vs no-surge)
+  - customer shock metrics (multiplier deltas)
+  - fairness slices by zone class
 
 Phase 3 configuration:
 - `configs/eda.yaml`: analysis window, top/bottom zone settings, report output paths.
