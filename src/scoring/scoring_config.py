@@ -61,6 +61,18 @@ def _env_str(name: str, default: str | None = None) -> str | None:
     return value
 
 
+def _env_bool(name: str, default: bool | None = None) -> bool | None:
+    value = os.getenv(name)
+    if value is None or value.strip() == "":
+        return default
+    normalized = value.strip().lower()
+    if normalized in {"1", "true", "yes", "y", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "n", "off"}:
+        return False
+    raise ValueError(f"{name} must be a boolean value (true/false), got: {value!r}")
+
+
 def _env_iso_dt(name: str) -> datetime | None:
     value = os.getenv(name)
     if value is None or value.strip() == "":
@@ -100,6 +112,8 @@ class ScoringConfig:
 
     prefect_work_pool: str
     prefect_work_queue: str
+    stale_data_fallback_enabled: bool = False
+    stale_data_floor_start_ts: datetime | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -126,6 +140,10 @@ class ScoringConfig:
             "mlflow_experiment_name": self.mlflow_experiment_name,
             "prefect_work_pool": self.prefect_work_pool,
             "prefect_work_queue": self.prefect_work_queue,
+            "stale_data_fallback_enabled": self.stale_data_fallback_enabled,
+            "stale_data_floor_start_ts": (
+                self.stale_data_floor_start_ts.isoformat() if self.stale_data_floor_start_ts else None
+            ),
         }
 
 
@@ -171,6 +189,8 @@ def load_scoring_config(*, training_config_path: str = "configs/training.yaml") 
 
     prefect_work_pool = str(_env_str("SCORING_PREFECT_WORK_POOL", "scoring-process"))
     prefect_work_queue = str(_env_str("SCORING_PREFECT_WORK_QUEUE", "scoring"))
+    stale_data_fallback_enabled = bool(_env_bool("SCORING_STALE_DATA_FALLBACK_ENABLED", False))
+    stale_data_floor_start_ts = _env_iso_dt("SCORING_STALE_DATA_FLOOR_START_TS")
 
     if horizon_buckets <= 0:
         raise ValueError(f"SCORING_HORIZON_BUCKETS must be > 0, got {horizon_buckets}")
@@ -202,4 +222,6 @@ def load_scoring_config(*, training_config_path: str = "configs/training.yaml") 
         mlflow_experiment_name=mlflow_experiment_name,
         prefect_work_pool=prefect_work_pool,
         prefect_work_queue=prefect_work_queue,
+        stale_data_fallback_enabled=stale_data_fallback_enabled,
+        stale_data_floor_start_ts=stale_data_floor_start_ts,
     )

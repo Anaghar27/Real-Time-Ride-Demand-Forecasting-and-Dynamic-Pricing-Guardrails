@@ -198,11 +198,14 @@ Phase 5 configuration:
   - `SCORING_FREQUENCY_MINUTES` (default `15`)
   - `RIDE_DEMAND_MODEL_NAME` / `RIDE_DEMAND_MODEL_STAGE` (default stage `Staging`)
   - `SCORING_FEATURE_VERSION` / `SCORING_POLICY_VERSION`
+  - `SCORING_STALE_DATA_FALLBACK_ENABLED` (`true/false`, default `false`)
+  - `SCORING_STALE_DATA_FLOOR_START_TS` (ISO8601 UTC floor used only when stale fallback is enabled)
 
 ### Phase 5 troubleshooting
 - **Model not found in registry stage**: confirm MLflow is up (`make smoke`) and the stage has a version. In MLflow UI (`make mlflow-ui`), check `Models -> ride-demand-forecast-model -> Versions`. Then set `RIDE_DEMAND_MODEL_NAME` / `RIDE_DEMAND_MODEL_STAGE` and rerun `make score-run`.
 - **Feature schema mismatch**: scoring expects the Phase 2 contract columns from `fact_demand_features` (calendar + lags + rollings). Rebuild features for the latest window (`make features-build`) and ensure `SCORING_FEATURE_VERSION` matches the published `feature_version`.
 - **Not enough history for lags/rollings**: increase `SCORING_HISTORY_DAYS` and/or backfill features further back in time. For weekly lag (`lag_672`) you typically want at least 8–14 days of history to avoid sparse/null lags.
+- **Using temporary historical scoring while upstream data catches up**: set `SCORING_STALE_DATA_FALLBACK_ENABLED=true` and `SCORING_STALE_DATA_FLOOR_START_TS=2025-11-02T00:00:00+00:00`. When feature freshness is stale, scoring starts from the latest observed feature bucket (not earlier than the configured floor). Once features are fresh again, scoring automatically returns to current-time scheduling.
 - **`zone_fallback_policy` missing**: scoring still runs, but confidence will not be segment-adjusted. Run Phase 3 (`make eda-run`) or create the policy table, then rerun scoring.
 - **Prefect schedule not running**: `make score-schedule` starts a local Prefect worker and blocks. In Prefect UI (`make urls`), verify the deployment exists and is scheduled, and that the worker is online.
 - **Duplicate rows / idempotency confusion**: `demand_forecast` uses `(forecast_run_key, zone_id, bucket_start_ts)` as the primary key and upserts on conflicts. If you change the horizon or model version, you will get a new `forecast_run_key` by design.

@@ -36,6 +36,7 @@ from src.scoring.feature_builder import (
     build_history_matrix,
     build_history_window,
     build_step_features,
+    ceil_to_bucket,
     load_holiday_dates,
     load_zone_ids_for_scoring,
 )
@@ -137,6 +138,37 @@ class ScoringResult:
     artifacts_dir: str | None
 
 
+def _as_utc_timestamp(value: datetime | pd.Timestamp) -> pd.Timestamp:
+    ts = pd.Timestamp(value)
+    if ts.tz is None:
+        return ts.tz_localize("UTC")
+    return ts.tz_convert("UTC")
+
+
+def _maybe_apply_stale_data_fallback(
+    *,
+    config: ScoringConfig,
+    forecast_start_ts: datetime,
+    horizon_buckets: int,
+    explicit_window_override: bool,
+    staleness: pd.Timedelta,
+    last_observed_end: pd.Timestamp,
+) -> tuple[datetime, datetime, bool]:
+    if explicit_window_override or not config.stale_data_fallback_enabled:
+        return forecast_start_ts, forecast_start_ts + timedelta(minutes=config.bucket_minutes * horizon_buckets), False
+    if staleness <= pd.Timedelta(minutes=config.max_feature_staleness_minutes):
+        return forecast_start_ts, forecast_start_ts + timedelta(minutes=config.bucket_minutes * horizon_buckets), False
+
+    fallback_start = last_observed_end.to_pydatetime()
+    if config.stale_data_floor_start_ts is not None:
+        floor_start = ceil_to_bucket(config.stale_data_floor_start_ts, config.bucket_minutes)
+        if floor_start > fallback_start:
+            fallback_start = floor_start
+
+    fallback_end = fallback_start + timedelta(minutes=config.bucket_minutes * horizon_buckets)
+    return fallback_start, fallback_end, fallback_start != forecast_start_ts
+
+
 def run_scoring(
     *,
     run_id: str | None = None,
@@ -166,6 +198,15 @@ def run_scoring(
         forecast_start_ts = forecast_start_override
     if forecast_end_override:
         forecast_end_ts = forecast_end_override
+    has_explicit_window_override = any(
+        value is not None
+        for value in (
+            cfg.forecast_start_override,
+            cfg.forecast_end_override,
+            forecast_start_override,
+            forecast_end_override,
+        )
+    )
 
     bucket_width = timedelta(minutes=cfg.bucket_minutes)
     if forecast_end_ts <= forecast_start_ts:
@@ -233,18 +274,36 @@ def run_scoring(
             bucket_minutes=cfg.bucket_minutes,
             max_zones=cfg.max_zones,
         )
-        latest_bucket = pd.Timestamp(latest_bucket_ts)
-        if latest_bucket.tz is None:
-            latest_bucket = latest_bucket.tz_localize("UTC")
-        else:
-            latest_bucket = latest_bucket.tz_convert("UTC")
-        forecast_start_pd = pd.Timestamp(forecast_start_ts)
-        if forecast_start_pd.tz is None:
-            forecast_start_pd = forecast_start_pd.tz_localize("UTC")
-        else:
-            forecast_start_pd = forecast_start_pd.tz_convert("UTC")
+        latest_bucket = _as_utc_timestamp(latest_bucket_ts)
+        forecast_start_pd = _as_utc_timestamp(forecast_start_ts)
         last_observed_end = latest_bucket + pd.Timedelta(minutes=cfg.bucket_minutes)
         staleness = forecast_start_pd - last_observed_end
+        forecast_start_ts, forecast_end_ts, used_stale_fallback = _maybe_apply_stale_data_fallback(
+            config=cfg,
+            forecast_start_ts=forecast_start_ts,
+            horizon_buckets=horizon_buckets,
+            explicit_window_override=has_explicit_window_override,
+            staleness=staleness,
+            last_observed_end=last_observed_end,
+        )
+        if used_stale_fallback:
+            LOGGER.warning(
+                "Feature data stale; applying fallback forecast window start=%s end=%s (latest_observed_end=%s)",
+                forecast_start_ts.isoformat(),
+                forecast_end_ts.isoformat(),
+                last_observed_end.isoformat(),
+            )
+            zone_ids, latest_bucket_ts = load_zone_ids_for_scoring(
+                engine=engine,
+                as_of_ts=forecast_start_ts,
+                feature_version=cfg.feature_version,
+                bucket_minutes=cfg.bucket_minutes,
+                max_zones=cfg.max_zones,
+            )
+            latest_bucket = _as_utc_timestamp(latest_bucket_ts)
+            forecast_start_pd = _as_utc_timestamp(forecast_start_ts)
+            last_observed_end = latest_bucket + pd.Timedelta(minutes=cfg.bucket_minutes)
+            staleness = forecast_start_pd - last_observed_end
         if staleness > pd.Timedelta(minutes=cfg.max_feature_staleness_minutes):
             staleness_minutes = staleness.total_seconds() / 60.0
             raise RuntimeError(
