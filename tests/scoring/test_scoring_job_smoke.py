@@ -11,10 +11,17 @@ from src.scoring import scoring_job
 
 
 def test_scoring_flow_runs_with_mocked_orchestrator(monkeypatch: Any) -> None:
+    class _LoggerStub:
+        def info(self, *_args: Any, **_kwargs: Any) -> None:
+            return None
+
     monkeypatch.setattr(scoring_job, "run_scoring", lambda: {"status": "succeeded", "run_id": "test"})
-    result = scoring_job.scoring_flow()
+    monkeypatch.setattr(scoring_job, "get_run_logger", lambda: _LoggerStub())
+    # Call the underlying function to avoid creating a Prefect flow run in CI.
+    result = scoring_job.scoring_flow.fn()
     assert result["status"] == "succeeded"
     assert result["run_id"] == "test"
+
 
 def test_apply_deployment_builds_from_flow(monkeypatch: Any) -> None:
     captured: dict[str, Any] = {}
