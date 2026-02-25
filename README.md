@@ -221,6 +221,71 @@ make smoke
 - Schedule pricing with Prefect (register deployment + start worker): `make pricing-schedule`
 - Show URLs: `make pricing-show-urls`
 
+## Phase 7 API commands
+- Run API (prod-style): `make api-run`
+- Run API (dev reload): `make api-dev`
+- Show API URLs: `make api-show-urls`
+- Run API tests: `make api-test`
+- Run API lint: `make api-lint`
+- Format API code: `make api-format`
+- Check schema contracts: `make api-contract-check`
+- Check plain-language mappings: `make api-plain-language-check`
+- Export OpenAPI JSON: `make api-openapi-export`
+
+### Phase 7 endpoint catalog
+- Health:
+  - `GET /health`
+  - `GET /ready`
+  - `GET /version`
+- Pricing (`/api/v1/pricing`):
+  - `GET /latest`
+  - `GET /window`
+  - `GET /zone/{zone_id}`
+  - `GET /runs/latest`
+  - `GET /runs/{run_id}`
+- Forecast (`/api/v1/forecast`):
+  - `GET /latest`
+  - `GET /window`
+  - `GET /zone/{zone_id}`
+  - `GET /runs/latest`
+  - `GET /runs/{run_id}`
+- Metadata (`/api/v1/metadata`):
+  - `GET /zones`
+  - `GET /reason-codes`
+  - `GET /policy/current`
+  - `GET /schema`
+- Diagnostics (`/api/v1/diagnostics`):
+  - `GET /coverage/latest`
+  - `GET /guardrails/latest`
+  - `GET /confidence/latest`
+
+### Phase 7 examples
+- Health:
+  - `curl -s http://localhost:8000/health | jq`
+- Pricing latest:
+  - `curl -s "http://localhost:8000/api/v1/pricing/latest?page=1&page_size=5&sort=bucket_start_ts:desc" | jq`
+- Pricing window:
+  - `curl -s "http://localhost:8000/api/v1/pricing/window?start_ts=2026-02-25T10:00:00Z&end_ts=2026-02-25T11:00:00Z&borough=Manhattan&page=1&page_size=5&sort=zone_id:asc" | jq`
+- Forecast latest:
+  - `curl -s "http://localhost:8000/api/v1/forecast/latest?page=1&page_size=5&sort=bucket_start_ts:desc" | jq`
+- Metadata reason codes:
+  - `curl -s "http://localhost:8000/api/v1/metadata/reason-codes?page=1&page_size=20&sort=reason_code:asc" | jq`
+
+### Phase 7 troubleshooting
+- DB connection errors:
+  - verify `DATABASE_URL` in `.env`
+  - run `make db-shell`
+- No latest run found:
+  - run Phase 5 (`make score-run`) and Phase 6 (`make pricing-run`) to populate run logs
+- Schema mismatch:
+  - run `make api-contract-check`
+  - inspect `reports/api/contract_checks/contract_diff_report.md`
+- Invalid query params:
+  - API returns structured errors with `error_code`, `message`, `details`, and `request_id`
+- Slow endpoints:
+  - filter by `zone_id`, `bucket_start_ts`, and run endpoints where possible
+  - keep `page_size` under configured limits
+
 Phase 4 configuration:
 - `configs/training.yaml`: feature/training window (fixed `start_date`/`end_date` or auto-derived via `data.auto_window`).
 - `configs/split_policy.yaml`: holdout/rolling split policy (explicit timestamps or auto-derived windows).

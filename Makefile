@@ -12,7 +12,7 @@ VENV_PIP := .venv/bin/pip
 VENV_UVICORN := .venv/bin/uvicorn
 VENV_PREFECT := .venv/bin/prefect
 
-.PHONY: help setup up down restart logs ps api test lint format typecheck check clean db-shell smoke mlflow-ui urls ingest-sample-download ingest-zone-dim ingest-load-sample ingest-validate ingest-run-sample ingest-rerun-sample ingest-gate-check ingest-backfill-pilot ingest-backfill-full ingest-incremental features-time-buckets features-aggregate features-calendar features-lag-roll features-validate features-publish features-build eda-seasonality eda-sparsity eda-fallback-policy eda-docs eda-validate eda-run train-prepare-data train-show-splits train-baseline train-candidates train-compare train-track train-select-champion train-register train-register-staging train-register-production train-run-all train-auto score-run score-run-window score-validate score-schedule score-show-urls pricing-load-policy pricing-compute-raw pricing-apply-caps pricing-apply-rate-limit pricing-reason-codes pricing-save pricing-validate pricing-run pricing-run-window pricing-run-all pricing-schedule pricing-show-urls pricing-evaluate
+.PHONY: help setup up down restart logs ps api api-run api-dev api-test api-contract-check api-lint api-format api-show-urls api-smoke api-openapi-export api-plain-language-check test lint format typecheck check clean db-shell smoke mlflow-ui urls ingest-sample-download ingest-zone-dim ingest-load-sample ingest-validate ingest-run-sample ingest-rerun-sample ingest-gate-check ingest-backfill-pilot ingest-backfill-full ingest-incremental features-time-buckets features-aggregate features-calendar features-lag-roll features-validate features-publish features-build eda-seasonality eda-sparsity eda-fallback-policy eda-docs eda-validate eda-run train-prepare-data train-show-splits train-baseline train-candidates train-compare train-track train-select-champion train-register train-register-staging train-register-production train-run-all train-auto score-run score-run-window score-validate score-schedule score-show-urls pricing-load-policy pricing-compute-raw pricing-apply-caps pricing-apply-rate-limit pricing-reason-codes pricing-save pricing-validate pricing-run pricing-run-window pricing-run-all pricing-schedule pricing-show-urls pricing-evaluate
 
 FEATURE_START_DATE ?= 2024-01-01
 FEATURE_END_DATE ?= 2024-01-07
@@ -52,8 +52,50 @@ logs: ## Tail logs for all services
 ps: ## Show running services
 	@$(COMPOSE) ps
 
-api: ## Run API locally without Docker
+api: api-dev ## Alias for development API server
+
+api-run: ## Run versioned API without auto-reload
+	@$(VENV_UVICORN) src.api.main:app --host $(API_HOST) --port $(API_PORT)
+
+api-dev: ## Run versioned API with auto-reload
 	@$(VENV_UVICORN) src.api.main:app --host $(API_HOST) --port $(API_PORT) --reload
+
+api-test: ## Run API-focused test suite
+	@$(VENV_PYTHON) -m pytest tests/api
+
+api-contract-check: ## Validate API contracts and update snapshot/diff artifacts
+	@$(VENV_PYTHON) scripts/check_api_contracts.py
+
+api-lint: ## Run lint checks for API modules and tests
+	@$(VENV_PYTHON) -m ruff check src/api tests/api scripts/check_api_contracts.py scripts/check_plain_language_fields.py
+
+api-format: ## Format API modules and tests
+	@$(VENV_PYTHON) -m black src/api tests/api scripts/check_api_contracts.py scripts/check_plain_language_fields.py
+
+api-show-urls: ## Print API URLs and key endpoint paths
+	@echo "API Base:        http://localhost:$(API_PORT)"
+	@echo "OpenAPI JSON:    http://localhost:$(API_PORT)/openapi.json"
+	@echo "Swagger UI:      http://localhost:$(API_PORT)/docs"
+	@echo "Health:          http://localhost:$(API_PORT)/health"
+	@echo "Readiness:       http://localhost:$(API_PORT)/ready"
+	@echo "Version:         http://localhost:$(API_PORT)/version"
+	@echo "Pricing Latest:  http://localhost:$(API_PORT)/api/v1/pricing/latest"
+	@echo "Forecast Latest: http://localhost:$(API_PORT)/api/v1/forecast/latest"
+	@echo "Metadata Zones:  http://localhost:$(API_PORT)/api/v1/metadata/zones"
+
+api-smoke: ## Run API-only smoke checks
+	@set -euo pipefail; \
+	curl -fsS "http://localhost:$(API_PORT)/health" >/dev/null; \
+	curl -fsS "http://localhost:$(API_PORT)/ready" >/dev/null; \
+	curl -fsS "http://localhost:$(API_PORT)/version" >/dev/null; \
+	curl -fsS "http://localhost:$(API_PORT)/api/v1/metadata/schema" >/dev/null; \
+	echo "API smoke checks passed."
+
+api-openapi-export: ## Export OpenAPI schema to docs/api/openapi_v1.json
+	@$(VENV_PYTHON) -c "import json; from src.api.app import app; from pathlib import Path; p=Path('docs/api/openapi_v1.json'); p.parent.mkdir(parents=True, exist_ok=True); p.write_text(json.dumps(app.openapi(), indent=2, sort_keys=True), encoding='utf-8')"
+
+api-plain-language-check: ## Validate deterministic plain-language mappings
+	@$(VENV_PYTHON) scripts/check_plain_language_fields.py
 
 test: ## Run tests with coverage summary
 	@$(VENV_PYTHON) -m pytest

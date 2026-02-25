@@ -1,50 +1,10 @@
-"""
-FastAPI application entrypoint.
-It wires configuration and routes so the local platform can serve health checks and runtime APIs.
-The service is started via Uvicorn directly or through Docker Compose during local development.
-"""
+# This file keeps the historical API module path stable for existing run commands.
+# It exists so `uvicorn src.api.main:app` continues to work after the new app bootstrap split.
+# The actual FastAPI construction now lives in `src.api.app` to keep code organized.
+# This small compatibility shim avoids breaking existing scripts and docs.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from src.api.app import app
 
-from fastapi import FastAPI
-
-from src.common.db import test_connection
-from src.common.logging import configure_logging
-from src.common.settings import get_settings
-
-configure_logging()
-settings = get_settings()
-app = FastAPI(title=settings.PROJECT_NAME, version="0.1.0")
-
-
-def _utc_timestamp() -> str:
-    return datetime.now(tz=UTC).isoformat()
-
-
-@app.get("/health")
-def health() -> dict[str, str]:
-    return {
-        "status": "ok",
-        "environment": settings.ENV,
-        "timestamp": _utc_timestamp(),
-    }
-
-
-@app.get("/ready")
-def ready() -> dict[str, object]:
-    is_ready = test_connection()
-    return {
-        "ready": is_ready,
-        "database": "reachable" if is_ready else "unreachable",
-        "timestamp": _utc_timestamp(),
-    }
-
-
-@app.get("/version")
-def version() -> dict[str, str]:
-    return {
-        "project": settings.PROJECT_NAME,
-        "version": app.version,
-    }
+__all__ = ["app"]

@@ -593,3 +593,80 @@ docker compose --env-file .env -f infra/docker-compose.yml exec -T postgres \
 
 9.Check artifacts
 ls -la reports/pricing_guardrails
+
+
+Phase 7 tests:
+
+# 1) Start API
+make api-dev
+
+# 2) Core validation
+make api-show-urls
+make api-lint
+make api-test
+make api-contract-check
+make api-plain-language-check
+
+# 3) Health and version
+curl -s http://localhost:8000/health | jq
+curl -s http://localhost:8000/ready | jq
+curl -s http://localhost:8000/version | jq
+
+# 4) Pricing endpoints
+curl -s "http://localhost:8000/api/v1/pricing/latest?page=1&page_size=5&sort=bucket_start_ts:desc" | jq
+curl -s "http://localhost:8000/api/v1/pricing/window?start_ts=2026-02-25T10:00:00Z&end_ts=2026-02-25T11:00:00Z&page=1&page_size=5&sort=zone_id:asc" | jq
+curl -s "http://localhost:8000/api/v1/pricing/zone/101?start_ts=2026-02-25T10:00:00Z&end_ts=2026-02-25T11:00:00Z&page=1&page_size=5&sort=bucket_start_ts:asc" | jq
+curl -s "http://localhost:8000/api/v1/pricing/runs/latest" | jq
+
+# 5) Forecast endpoints
+curl -s "http://localhost:8000/api/v1/forecast/latest?page=1&page_size=5&sort=bucket_start_ts:desc" | jq
+curl -s "http://localhost:8000/api/v1/forecast/window?start_ts=2026-02-25T10:00:00Z&end_ts=2026-02-25T11:00:00Z&page=1&page_size=5&sort=zone_id:asc" | jq
+curl -s "http://localhost:8000/api/v1/forecast/zone/101?start_ts=2026-02-25T10:00:00Z&end_ts=2026-02-25T11:00:00Z&page=1&page_size=5&sort=bucket_start_ts:asc" | jq
+curl -s "http://localhost:8000/api/v1/forecast/runs/latest" | jq
+
+# 6) Metadata + diagnostics
+curl -s "http://localhost:8000/api/v1/metadata/zones?page=1&page_size=10&sort=zone_id:asc" | jq
+curl -s "http://localhost:8000/api/v1/metadata/reason-codes?page=1&page_size=20&sort=reason_code:asc" | jq
+curl -s "http://localhost:8000/api/v1/metadata/policy/current" | jq
+curl -s "http://localhost:8000/api/v1/metadata/schema" | jq
+curl -s "http://localhost:8000/api/v1/diagnostics/coverage/latest" | jq
+curl -s "http://localhost:8000/api/v1/diagnostics/guardrails/latest" | jq
+curl -s "http://localhost:8000/api/v1/diagnostics/confidence/latest" | jq
+
+# 7) Error-handling checks (should return structured 400/404)
+curl -s "http://localhost:8000/api/v1/pricing/window?start_ts=2026-02-26T00:00:00Z&end_ts=2026-02-25T00:00:00Z" | jq
+curl -s "http://localhost:8000/api/v1/pricing/latest?sort=bad_field:desc" | jq
+curl -s "http://localhost:8000/api/v1/forecast/zone/999999?start_ts=2026-02-25T10:00:00Z&end_ts=2026-02-25T11:00:00Z" | jq
+
+
+Before checking the api end points:
+
+# 1) Start infra (including Postgres)
+make up
+make ps
+
+# 2) Verify DB from project env
+source .venv/bin/activate
+echo "$DATABASE_URL"
+psql "$DATABASE_URL" -c "SELECT 1;"
+
+# 3) Ensure required tables exist
+psql "$DATABASE_URL" -f sql/scoring/create_forecast_tables.sql
+psql "$DATABASE_URL" -f sql/scoring/create_scoring_run_log.sql
+psql "$DATABASE_URL" -f sql/pricing_guardrails/create_pricing_tables.sql
+psql "$DATABASE_URL" -f sql/pricing_guardrails/create_pricing_run_log.sql
+psql "$DATABASE_URL" -f sql/ddl/dim_zone.sql
+psql "$DATABASE_URL" -f sql/pricing_guardrails/create_reason_code_reference.sql
+psql "$DATABASE_URL" -f sql/pricing_guardrails/create_pricing_policy_tables.sql
+psql "$DATABASE_URL" -f sql/api/create_api_request_log.sql
+psql "$DATABASE_URL" -f sql/api/create_api_contract_registry.sql
+
+# 4) Produce Phase 5/6 data (so latest endpoints have rows)
+make score-run
+make pricing-run
+
+# 5) Re-check readiness + endpoints
+curl -s http://localhost:8000/ready | jq
+curl -s "http://localhost:8000/api/v1/pricing/latest?page=1&page_size=5&sort=bucket_start_ts:desc" | jq
+curl -s "http://localhost:8000/api/v1/forecast/latest?page=
+
