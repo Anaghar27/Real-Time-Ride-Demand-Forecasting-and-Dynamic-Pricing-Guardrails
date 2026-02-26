@@ -1,0 +1,89 @@
+{
+  "id": null,
+  "uid": "scoring-observability",
+  "title": "Scoring Observability",
+  "tags": ["phase8", "scoring", "observability"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Coverage Percent by Run",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+      "datasource": {"type": "postgres", "uid": "postgres-main"},
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawSql": "SELECT started_at AS time, coverage_percent AS value FROM view_scoring_coverage_by_run ORDER BY started_at",
+          "editorMode": "code"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Confidence Band Distribution Over Time",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+      "datasource": {"type": "postgres", "uid": "postgres-main"},
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawSql": "SELECT time_bucket AS time, row_count AS value, uncertainty_band AS metric FROM view_scoring_confidence_band_over_time ORDER BY time_bucket",
+          "editorMode": "code"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Interval Width Percentiles",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+      "datasource": {"type": "postgres", "uid": "postgres-main"},
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawSql": "SELECT time_bucket AS time, p50_interval_width, p90_interval_width, p99_interval_width FROM view_scoring_interval_width_percentiles_over_time ORDER BY time_bucket",
+          "editorMode": "code"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Scoring Latency (ms)",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+      "datasource": {"type": "postgres", "uid": "postgres-main"},
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawSql": "SELECT started_at AS time, latency_ms AS value, status AS metric FROM view_scoring_latency_over_time ORDER BY started_at",
+          "editorMode": "code"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "table",
+      "title": "Forecast Row Count Expected vs Actual",
+      "gridPos": {"h": 10, "w": 24, "x": 0, "y": 16},
+      "datasource": {"type": "postgres", "uid": "postgres-main"},
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT run_id, started_at, expected_row_count, actual_row_count, row_count_delta FROM view_scoring_expected_vs_actual_rows ORDER BY started_at DESC LIMIT 100",
+          "editorMode": "code"
+        }
+      ]
+    }
+  ],
+  "templating": {"list": []},
+  "time": {"from": "now-7d", "to": "now"}
+}

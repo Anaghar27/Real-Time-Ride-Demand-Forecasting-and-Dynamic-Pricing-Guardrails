@@ -1,0 +1,104 @@
+{
+  "id": null,
+  "uid": "pipeline-overview",
+  "title": "Pipeline Overview",
+  "tags": ["phase8", "pipeline", "observability"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "panels": [
+    {
+      "id": 1,
+      "type": "table",
+      "title": "Latest Scoring Run Status",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+      "datasource": {"type": "postgres", "uid": "postgres-main"},
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT run_id, status, started_at, ended_at, duration_minutes, row_count, coverage_ratio, latency_ms FROM view_latest_scoring_run",
+          "editorMode": "code"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "table",
+      "title": "Latest Pricing Run Status",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+      "datasource": {"type": "postgres", "uid": "postgres-main"},
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT run_id, status, started_at, ended_at, duration_minutes, row_count, cap_applied_rate, rate_limited_rate, latency_ms FROM view_latest_pricing_run",
+          "editorMode": "code"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Minutes Since Last Successful Scoring",
+      "gridPos": {"h": 6, "w": 6, "x": 0, "y": 8},
+      "datasource": {"type": "postgres", "uid": "postgres-main"},
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT EXTRACT(EPOCH FROM (NOW() - MAX(ended_at))) / 60.0 AS value FROM scoring_run_log WHERE LOWER(status) = 'success'",
+          "editorMode": "code"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Minutes Since Last Successful Pricing",
+      "gridPos": {"h": 6, "w": 6, "x": 6, "y": 8},
+      "datasource": {"type": "postgres", "uid": "postgres-main"},
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT EXTRACT(EPOCH FROM (NOW() - MAX(ended_at))) / 60.0 AS value FROM pricing_run_log WHERE LOWER(status) = 'success'",
+          "editorMode": "code"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "table",
+      "title": "Recent Scoring Failures",
+      "gridPos": {"h": 10, "w": 12, "x": 12, "y": 8},
+      "datasource": {"type": "postgres", "uid": "postgres-main"},
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT run_id, started_at, ended_at, failure_reason FROM scoring_run_log WHERE LOWER(status) = 'failed' ORDER BY started_at DESC LIMIT 25",
+          "editorMode": "code"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "table",
+      "title": "Recent Pricing Failures",
+      "gridPos": {"h": 10, "w": 12, "x": 0, "y": 14},
+      "datasource": {"type": "postgres", "uid": "postgres-main"},
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT run_id, started_at, ended_at, failure_reason FROM pricing_run_log WHERE LOWER(status) = 'failed' ORDER BY started_at DESC LIMIT 25",
+          "editorMode": "code"
+        }
+      ]
+    }
+  ],
+  "templating": {"list": []},
+  "time": {"from": "now-24h", "to": "now"}
+}

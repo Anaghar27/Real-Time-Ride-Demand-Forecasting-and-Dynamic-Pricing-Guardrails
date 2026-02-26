@@ -1,0 +1,74 @@
+{
+  "id": null,
+  "uid": "api-observability",
+  "title": "API Observability",
+  "tags": ["phase8", "api", "latency"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "15s",
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Request Count",
+      "gridPos": {"h": 8, "w": 8, "x": 0, "y": 0},
+      "datasource": {"type": "postgres", "uid": "postgres-main"},
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawSql": "SELECT time_bucket AS time, request_count AS value FROM view_api_request_counts ORDER BY time_bucket",
+          "editorMode": "code"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Latency p50 and p95 (ms)",
+      "gridPos": {"h": 8, "w": 8, "x": 8, "y": 0},
+      "datasource": {"type": "postgres", "uid": "postgres-main"},
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawSql": "SELECT time_bucket AS time, latency_p50_ms, latency_p95_ms FROM view_api_latency_percentiles ORDER BY time_bucket",
+          "editorMode": "code"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Server Error Rate (%)",
+      "gridPos": {"h": 8, "w": 8, "x": 16, "y": 0},
+      "datasource": {"type": "postgres", "uid": "postgres-main"},
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawSql": "SELECT time_bucket AS time, error_rate_percent AS value FROM view_api_error_rate ORDER BY time_bucket",
+          "editorMode": "code"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "table",
+      "title": "Top Endpoints by Volume",
+      "gridPos": {"h": 12, "w": 24, "x": 0, "y": 8},
+      "datasource": {"type": "postgres", "uid": "postgres-main"},
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT path, method, request_count, avg_duration_ms, p95_duration_ms FROM view_api_top_endpoints ORDER BY request_count DESC LIMIT 30",
+          "editorMode": "code"
+        }
+      ]
+    }
+  ],
+  "templating": {"list": []},
+  "time": {"from": "now-24h", "to": "now"}
+}

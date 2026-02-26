@@ -11,8 +11,9 @@ VENV_PYTHON := .venv/bin/python
 VENV_PIP := .venv/bin/pip
 VENV_UVICORN := .venv/bin/uvicorn
 VENV_PREFECT := .venv/bin/prefect
+VENV_STREAMLIT := .venv/bin/streamlit
 
-.PHONY: help setup up down restart logs ps api api-run api-dev api-test api-contract-check api-lint api-format api-show-urls api-smoke api-openapi-export api-plain-language-check test lint format typecheck check clean db-shell smoke mlflow-ui urls ingest-sample-download ingest-zone-dim ingest-load-sample ingest-validate ingest-run-sample ingest-rerun-sample ingest-gate-check ingest-backfill-pilot ingest-backfill-full ingest-incremental features-time-buckets features-aggregate features-calendar features-lag-roll features-validate features-publish features-build eda-seasonality eda-sparsity eda-fallback-policy eda-docs eda-validate eda-run train-prepare-data train-show-splits train-baseline train-candidates train-compare train-track train-select-champion train-register train-register-staging train-register-production train-run-all train-auto score-run score-run-window score-validate score-schedule score-show-urls pricing-load-policy pricing-compute-raw pricing-apply-caps pricing-apply-rate-limit pricing-reason-codes pricing-save pricing-validate pricing-run pricing-run-window pricing-run-all pricing-schedule pricing-show-urls pricing-evaluate
+.PHONY: help setup up down restart logs ps api api-run api-dev api-test api-contract-check api-lint api-format api-show-urls api-smoke api-openapi-export api-plain-language-check test lint format typecheck check clean db-shell smoke mlflow-ui urls ingest-sample-download ingest-zone-dim ingest-load-sample ingest-validate ingest-run-sample ingest-rerun-sample ingest-gate-check ingest-backfill-pilot ingest-backfill-full ingest-incremental features-time-buckets features-aggregate features-calendar features-lag-roll features-validate features-publish features-build eda-seasonality eda-sparsity eda-fallback-policy eda-docs eda-validate eda-run train-prepare-data train-show-splits train-baseline train-candidates train-compare train-track train-select-champion train-register train-register-staging train-register-production train-run-all train-auto score-run score-run-window score-validate score-schedule score-show-urls pricing-load-policy pricing-compute-raw pricing-apply-caps pricing-apply-rate-limit pricing-reason-codes pricing-save pricing-validate pricing-run pricing-run-window pricing-run-all pricing-schedule pricing-show-urls pricing-evaluate dashboard-user-run dashboard-user-dev dashboard-user-test dashboard-tech-up dashboard-tech-down dashboard-tech-open dashboard-tech-provision run-all-phases
 
 FEATURE_START_DATE ?= 2024-01-01
 FEATURE_END_DATE ?= 2024-01-07
@@ -384,3 +385,60 @@ pricing-show-urls: ## Print pricing-relevant local URLs
 pricing-evaluate: ## Phase 6 run market evaluation query pack for latest successful pricing run
 	@cat sql/pricing_guardrails/market_evaluation_queries.sql | \
 	$(COMPOSE) exec -T postgres psql -U $(POSTGRES_USER) -d $(POSTGRES_DB)
+
+dashboard-user-run: ## Run Streamlit user decision-support dashboard
+	@$(VENV_PYTHON) -m streamlit run src/dashboard_user/app.py
+
+dashboard-user-dev: ## Run Streamlit dashboard in dev-friendly mode
+	@STREAMLIT_SERVER_RUN_ON_SAVE=true $(VENV_PYTHON) -m streamlit run src/dashboard_user/app.py
+
+dashboard-user-test: ## Run dashboard user test suite
+	@$(VENV_PYTHON) -m pytest tests/dashboard_user
+
+dashboard-tech-up: ## Start Grafana technical dashboard service and apply latest provisioning
+	@$(MAKE) dashboard-tech-provision
+	@$(COMPOSE) up -d --force-recreate grafana
+
+dashboard-tech-down: ## Stop Grafana technical dashboard service
+	@$(COMPOSE) stop grafana
+
+dashboard-tech-open: ## Print Grafana URL and default local credentials
+	@echo "Grafana URL:  http://localhost:$(GRAFANA_PORT)"
+	@echo "Username:     admin"
+	@echo "Password:     admin"
+
+dashboard-tech-provision: ## Sync Grafana dashboards and apply SQL view helpers
+	@mkdir -p infra/grafana/provisioning/datasources
+	@mkdir -p infra/grafana/provisioning/dashboards
+	@cp -f grafana/provisioning/datasources/postgres.yaml infra/grafana/provisioning/datasources/postgres.yaml
+	@cp -f grafana/provisioning/dashboards/dashboards.yaml infra/grafana/provisioning/dashboards/dashboards.yaml
+	@cp -f grafana/dashboards/*.json infra/grafana/provisioning/dashboards/
+	@$(COMPOSE) up -d postgres
+	@cat sql/dashboards/observability_views.sql | $(COMPOSE) exec -T postgres psql -U $(POSTGRES_USER) -d $(POSTGRES_DB)
+	@cat sql/dashboards/scoring_metrics_views.sql | $(COMPOSE) exec -T postgres psql -U $(POSTGRES_USER) -d $(POSTGRES_DB)
+	@cat sql/dashboards/pricing_metrics_views.sql | $(COMPOSE) exec -T postgres psql -U $(POSTGRES_USER) -d $(POSTGRES_DB)
+	@cat sql/api/create_api_request_log.sql | $(COMPOSE) exec -T postgres psql -U $(POSTGRES_USER) -d $(POSTGRES_DB)
+	@cat sql/dashboards/api_metrics_views.sql | $(COMPOSE) exec -T postgres psql -U $(POSTGRES_USER) -d $(POSTGRES_DB)
+	@$(COMPOSE) restart grafana >/dev/null 2>&1 || true
+	@echo "Dashboard provisioning synced and SQL views applied."
+
+run-all-phases: ## Run Phase 1 through Phase 8 in one ordered command chain (non-blocking)
+	@$(MAKE) setup
+	@$(MAKE) up
+	@$(MAKE) ingest-sample-download
+	@$(MAKE) ingest-zone-dim
+	@$(MAKE) ingest-load-sample
+	@$(MAKE) ingest-validate
+	@$(MAKE) ingest-run-sample
+	@$(MAKE) ingest-rerun-sample
+	@$(MAKE) ingest-gate-check
+	@$(MAKE) features-build
+	@$(MAKE) eda-run
+	@$(MAKE) train-run-all
+	@$(MAKE) score-run
+	@$(MAKE) pricing-run
+	@$(MAKE) api-smoke
+	@$(MAKE) dashboard-tech-provision
+	@$(MAKE) dashboard-tech-up
+	@$(MAKE) dashboard-user-test
+	@echo "All phases completed. Launch user dashboard with: make dashboard-user-run"

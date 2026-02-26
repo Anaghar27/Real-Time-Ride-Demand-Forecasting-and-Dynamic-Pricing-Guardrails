@@ -259,6 +259,59 @@ make smoke
   - `GET /guardrails/latest`
   - `GET /confidence/latest`
 
+## Phase 8 dashboards (Streamlit + Grafana)
+
+### One-command full run
+- Run all phases 1 through 8 in order:
+  - `make run-all-phases`
+
+### User dashboard (decision support)
+- Run:
+  - `make dashboard-user-run`
+- Dev mode:
+  - `make dashboard-user-dev`
+- Tests:
+  - `make dashboard-user-test`
+- App entrypoint:
+  - `src/dashboard_user/app.py`
+
+### Technical dashboard (Grafana observability)
+- Provision dashboards + SQL views:
+  - `make dashboard-tech-provision`
+- Start Grafana:
+  - `make dashboard-tech-up`
+- Stop Grafana:
+  - `make dashboard-tech-down`
+- Print URL and credentials:
+  - `make dashboard-tech-open`
+
+### Dashboard data-source policy
+- User dashboard source of truth:
+  - API-first (`/api/v1`) for plain-language fields such as `why_this_price`, `guardrail_note`, and `confidence_note`
+  - DB fallback through `src/dashboard_user/db_client.py` when API is unavailable
+  - unified routing in `src/dashboard_user/data_access.py`
+- Technical dashboard source of truth:
+  - Postgres views in `sql/dashboards/*.sql`
+  - Grafana dashboards in `grafana/dashboards/*.json`
+
+### Troubleshooting
+- API is down:
+  - User dashboard automatically falls back to direct Postgres reads.
+  - Plain-language fields are generated from reason codes and multiplier values when API fields are unavailable.
+- Missing latest run:
+  - Streamlit pages show empty-state messages instead of failing.
+  - Check `scoring_run_log` and `pricing_run_log` for successful rows.
+- Empty filter windows:
+  - Widen `start_ts` and `end_ts`.
+  - Disable strict toggles (`cap_applied`, `rate_limit_applied`, low-confidence only).
+- Grafana datasource connection issues:
+  - Confirm Postgres service is running (`make ps`).
+  - Re-apply provisioning and views (`make dashboard-tech-provision`).
+  - Restart Grafana (`make dashboard-tech-up`).
+
+### Demo flow
+Use `docs/dashboards/dashboard_demo_script.md` for a concise walkthrough sequence.
+
 ### Phase 7 examples
 - Health:
   - `curl -s http://localhost:8000/health | jq`

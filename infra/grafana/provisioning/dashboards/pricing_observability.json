@@ -1,0 +1,89 @@
+{
+  "id": null,
+  "uid": "pricing-observability",
+  "title": "Pricing Observability",
+  "tags": ["phase8", "pricing", "guardrails"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Cap Applied Percent by Run",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+      "datasource": {"type": "postgres", "uid": "postgres-main"},
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawSql": "SELECT started_at AS time, cap_applied_percent AS value FROM view_pricing_cap_rate_by_run ORDER BY started_at",
+          "editorMode": "code"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Rate-Limited Percent by Run",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+      "datasource": {"type": "postgres", "uid": "postgres-main"},
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawSql": "SELECT started_at AS time, rate_limited_percent AS value FROM view_pricing_rate_limit_rate_by_run ORDER BY started_at",
+          "editorMode": "code"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "heatmap",
+      "title": "Final Multiplier Distribution",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+      "datasource": {"type": "postgres", "uid": "postgres-main"},
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT time_bucket AS \"time\", multiplier_bucket, row_count FROM view_pricing_multiplier_distribution ORDER BY time_bucket, multiplier_bucket",
+          "editorMode": "code"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "table",
+      "title": "Top Reason Codes",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+      "datasource": {"type": "postgres", "uid": "postgres-main"},
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT primary_reason_code, row_count FROM view_pricing_reason_code_top ORDER BY row_count DESC LIMIT 20",
+          "editorMode": "code"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Average Final Multiplier by Borough",
+      "gridPos": {"h": 10, "w": 24, "x": 0, "y": 16},
+      "datasource": {"type": "postgres", "uid": "postgres-main"},
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawSql": "SELECT time_bucket AS time, avg_final_multiplier AS value, borough AS metric FROM view_pricing_average_multiplier_by_borough ORDER BY time_bucket, borough",
+          "editorMode": "code"
+        }
+      ]
+    }
+  ],
+  "templating": {"list": []},
+  "time": {"from": "now-7d", "to": "now"}
+}
