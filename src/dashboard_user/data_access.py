@@ -8,7 +8,7 @@ from __future__ import annotations
 import time
 from dataclasses import asdict
 from datetime import datetime
-from typing import Any
+from typing import Any, cast
 
 import pandas as pd
 
@@ -56,7 +56,7 @@ class DashboardDataAccess:
         cache_key = ("zones",)
         cached = self.cache.get(cache_key)
         if cached is not None:
-            return cached
+            return cast(tuple[pd.DataFrame, str], cached)
 
         def loader() -> tuple[pd.DataFrame, str]:
             try:
@@ -87,7 +87,7 @@ class DashboardDataAccess:
         cache_key = ("reason_codes",)
         cached = self.cache.get(cache_key)
         if cached is not None:
-            return cached
+            return cast(tuple[pd.DataFrame, str], cached)
 
         def loader() -> tuple[pd.DataFrame, str]:
             try:
@@ -118,7 +118,7 @@ class DashboardDataAccess:
         cache_key = ("latest_run_metadata",)
         cached = self.cache.get(cache_key)
         if cached is not None:
-            return cached
+            return cast(dict[str, Any], cached)
 
         pricing_run: dict[str, Any] | None = None
         pricing_source = "none"
@@ -167,7 +167,7 @@ class DashboardDataAccess:
         cache_key = ("recent_pricing_runs", max_items)
         cached = self.cache.get(cache_key)
         if cached is not None:
-            return cached
+            return cast(pd.DataFrame, cached)
 
         try:
             runs = self.db_client.get_recent_pricing_runs(limit=max_items)
@@ -190,7 +190,7 @@ class DashboardDataAccess:
         cache_key = ("feature_time_bounds",)
         cached = self.cache.get(cache_key)
         if cached is not None:
-            return cached
+            return cast(tuple[datetime | None, datetime | None, str], cached)
 
         try:
             min_ts, max_ts = self.db_client.get_feature_time_bounds()
@@ -211,7 +211,7 @@ class DashboardDataAccess:
         cache_key = ("pricing_window", tuple(asdict(filters).items()))
         cached = self.cache.get(cache_key)
         if cached is not None:
-            return cached
+            return cast(tuple[pd.DataFrame, str], cached)
 
         page_size = self.config.clamp_page_size(filters.page_size)
 
@@ -269,7 +269,7 @@ class DashboardDataAccess:
         cache_key = ("forecast_window", tuple(asdict(filters).items()))
         cached = self.cache.get(cache_key)
         if cached is not None:
-            return cached
+            return cast(tuple[pd.DataFrame, str], cached)
 
         page_size = self.config.clamp_page_size(filters.page_size)
 

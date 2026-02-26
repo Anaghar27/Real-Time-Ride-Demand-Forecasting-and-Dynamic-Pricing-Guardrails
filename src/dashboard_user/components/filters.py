@@ -5,7 +5,8 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, time
+from datetime import UTC, date, datetime, time
+from typing import cast
 
 import pandas as pd
 import streamlit as st
@@ -75,14 +76,15 @@ def render_sidebar_filters(
     if min_feature_date and st.session_state["dashboard_end_date"] < min_feature_date:
         st.session_state["dashboard_end_date"] = min_feature_date
 
-    date_bounds: dict[str, object] = {}
-    if min_feature_date:
-        date_bounds["min_value"] = min_feature_date
-    if max_feature_date:
-        date_bounds["max_value"] = max_feature_date
+    start_date_value = cast(date, st.session_state["dashboard_start_date"])
+    end_date_value = cast(date, st.session_state["dashboard_end_date"])
 
     start_date = st.sidebar.date_input(
-        "Start date (UTC)", key="dashboard_start_date", **date_bounds
+        "Start date (UTC)",
+        value=start_date_value,
+        min_value=min_feature_date,
+        max_value=max_feature_date,
+        key="dashboard_start_date",
     )
     start_time = st.sidebar.time_input(
         "Start time (UTC)",
@@ -90,7 +92,13 @@ def render_sidebar_filters(
         step=60,
     )
 
-    end_date = st.sidebar.date_input("End date (UTC)", key="dashboard_end_date", **date_bounds)
+    end_date = st.sidebar.date_input(
+        "End date (UTC)",
+        value=end_date_value,
+        min_value=min_feature_date,
+        max_value=max_feature_date,
+        key="dashboard_end_date",
+    )
     end_time = st.sidebar.time_input(
         "End time (UTC)",
         key="dashboard_end_time",

@@ -5,6 +5,10 @@
 
 from __future__ import annotations
 
+from datetime import datetime
+from typing import Any
+
+import pandas as pd
 import streamlit as st
 
 from src.dashboard_user.components.filters import render_sidebar_filters
@@ -33,31 +37,31 @@ def main() -> None:
     data_access = get_data_access()
 
     @st.cache_data(ttl=config.metadata_cache_ttl_seconds)
-    def load_zones() -> tuple[object, str]:
+    def load_zones() -> tuple[pd.DataFrame, str]:
         return data_access.get_zone_catalog()
 
     @st.cache_data(ttl=config.metadata_cache_ttl_seconds)
-    def load_reason_codes() -> tuple[object, str]:
+    def load_reason_codes() -> tuple[pd.DataFrame, str]:
         return data_access.get_reason_code_catalog()
 
     @st.cache_data(ttl=config.metadata_cache_ttl_seconds)
-    def load_recent_pricing_runs() -> object:
+    def load_recent_pricing_runs() -> pd.DataFrame:
         return data_access.get_recent_pricing_runs(max_items=config.max_run_selector_options)
 
     @st.cache_data(ttl=config.metadata_cache_ttl_seconds)
-    def load_latest_run_metadata() -> dict[str, object]:
+    def load_latest_run_metadata() -> dict[str, Any]:
         return data_access.get_latest_run_metadata()
 
     @st.cache_data(ttl=config.metadata_cache_ttl_seconds)
-    def load_feature_time_bounds() -> tuple[object, object, str]:
+    def load_feature_time_bounds() -> tuple[datetime | None, datetime | None, str]:
         return data_access.get_feature_time_bounds()
 
     @st.cache_data(ttl=config.query_cache_ttl_seconds)
-    def load_pricing(filters: DashboardFilters) -> tuple[object, str]:
+    def load_pricing(filters: DashboardFilters) -> tuple[pd.DataFrame, str]:
         return data_access.get_pricing_data(filters)
 
     @st.cache_data(ttl=config.query_cache_ttl_seconds)
-    def load_forecast(filters: DashboardFilters) -> tuple[object, str]:
+    def load_forecast(filters: DashboardFilters) -> tuple[pd.DataFrame, str]:
         return data_access.get_forecast_data(filters)
 
     zones_df, zones_source = load_zones()
